@@ -20,6 +20,20 @@ WEBHOOK_USERNAME = os.getenv("WEBHOOK_USERNAME")
 WEBHOOK_PASSWORD = os.getenv("WEBHOOK_PASSWORD")
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN")
 
+security = HTTPBasic()
+
+def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -> bool:
+    """Checks the Basic Auth header Freshdesk sends against our own secret.
+    This is a credential you invent yourself and enter in the Freshdesk
+    Automation's 'Authentication' field - separate from the Freshdesk API key."""
+    if not WEBHOOK_USERNAME or not WEBHOOK_PASSWORD:
+        raise RuntimeError("WEBHOOK_USERNAME and WEBHOOK_PASSWORD must be configured")
+ 
+    valid_user = secrets.compare_digest(credentials.username, WEBHOOK_USERNAME)
+    valid_pass = secrets.compare_digest(credentials.password, WEBHOOK_PASSWORD)
+    if not (valid_user and valid_pass):
+        raise HTTPException(status_code=401, detail="Invalid webhook credentials")
+    return True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
