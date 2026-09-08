@@ -71,7 +71,7 @@ def reply_to_ticket(ticket_id: int, message_html: str) -> dict:
 
 
 @app.post("/freshdesk-webhook", status_code=202)
-async def receive_ticket(request: Request):
+async def receive_ticket(request: Request, authorized: bool = Depends(verify_webhook_auth)):
     payload = await request.json()
     print(f"Received webhook payload: {payload}")
 
