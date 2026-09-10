@@ -13,6 +13,7 @@ FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 BASE_URL = (f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2")
 FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD", "X")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
+SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
@@ -48,7 +49,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-def reply_to_ticket(ticket_id: int, message_html: str) -> dict:
+def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
@@ -59,34 +60,53 @@ def reply_to_ticket(ticket_id: int, message_html: str) -> dict:
         json={"body": message_html},
         timeout=15,
     )
-    assign = requests.put(
+    assign_agent = requests.put(
         f"{BASE_URL}/tickets/{ticket_id}",
         auth=AUTH,
         json={"responder_id": SUPPORT_AGENT_ID},
         timeout=15,
     )
+    assign_employee = requests.put(
+        f"{BASE_URL}/tickets/{ticket_id}",
+        auth=AUTH,
+        json={"responder_id": SUPPORT_EMPLOYEE_ID},
+        timeout=15,
+    )
+
     response.raise_for_status()
-    assign.raise_for_status()
-    return {"reply": response.json(), "assign": assign.json()}
+    assign_agent.raise_for_status()
+    assign_employee.raise_for_status()
+    if assign == 1:
+        assigning = assign_agent
+    else:
+        assigning = assign_employee
+    return {"reply": response.json(), "assign": assigning.json()}
 
 
 @app.post("/freshdesk-webhook", status_code=202)
 async def receive_ticket(request: Request, authorized: bool = Depends(verify_webhook_auth)):
+    raw_payload = await request.body()
     payload = await request.json()
     print(f"Received webhook payload: {payload}")
 
     ticket_id = payload.get("ticket_id")
     requester_email = payload.get("requester_email")
-    requester_name = payload.get("requester_name")
+    description = payload.get("description_text")
 
-    reply_message = (
-        f"Hi {requester_name}, thanks for reaching out. Could you send us a screenshot of a "
-        "speedtest, your address, and your IP address so we can look into this?"
-    )
+    if "wifi" in description.lower() or "internet" in description.lower():
+        assign = 1  # Assign to AI agent
+        reply_message = (f"Hi, thanks for reaching out. Could you send us a screenshot of a "
+                "speedtest, your address, and your IP address so we can look into this?")
+    else:
+        assign = 2  # Assign to human employee
+        reply_message = (f"Hi, thanks for reaching out. Our employees will contact you soon.")
  
     try:
-        reply_to_ticket(int(ticket_id), reply_message)
-        print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the AI agent.")
+        reply_to_ticket(int(ticket_id), reply_message, assign)
+        if assign == 1:
+            print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the AI agent.")
+        else:
+            print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the human employee.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
         raise HTTPException(status_code=502, detail="Failed to send reply via Freshdesk")
