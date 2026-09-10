@@ -91,7 +91,6 @@ def classify_and_draft_reply(description: str) -> dict:
             "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
         }
 
-    print(response)
     return result
 
 
@@ -119,6 +118,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
         timeout=15,
     )
 
+    print(response)
     response.raise_for_status()
     assign_agent.raise_for_status()
     assign_employee.raise_for_status()
@@ -133,6 +133,7 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     decision = classify_and_draft_reply(description)
     assign = 1 if decision["category"] == "wifi_or_internet" else 2
     reply_message = decision["reply"]
+    print(decision)
  
     try:
         reply_to_ticket(ticket_id, reply_message, assign)
