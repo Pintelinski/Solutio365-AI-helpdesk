@@ -75,3 +75,27 @@ We wil now go over to installing all python dependencies to eventually pull and 
     ```cli
     sudo apt install python3 python3-pip python3-venv -y
     ```
+
+2. Make your directory where you would want the AI agent to be:
+
+    ```cli
+    mkdir ~/<your-directory-name>
+    ```
+
+3. Go into your directory and clone the Git repository into your directory and setup the environmental variables:
+
+    ```cli
+    cd ~/<your-directory-name>
+    git clone https://github.com/Pintelinski/Solutio365-AI-helpdesk 
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    cp .env.example .env
+    nano .env #fill in your actual environmental variables in the places of the placeholders
+    ```
+
+4. Your app should be ready to run, so we can run it with the following command:
+
+    ```cli
+    uvicorn freshdesk_agent:app --host 0.0.0.0 --port 8085 --env-file .env
+    ```
