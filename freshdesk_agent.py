@@ -72,8 +72,12 @@ def classify_and_draft_reply(description: str) -> dict:
             {"role": "user", "content": description},
         ],
         format="json",
-        think=False,
+        think=True,
     )
+
+    thinking = getattr(response.message, "thinking", None)
+    if thinking:
+        print(f"Model reasoning (not sent to tenant): {thinking}")
  
     content = response.message.content
     print(f"Model raw output: {content!r}")

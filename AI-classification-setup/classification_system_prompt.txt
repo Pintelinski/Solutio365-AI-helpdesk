@@ -7,6 +7,9 @@ So an example:
 {"category": "wifi_or_internet", "reply": "Thank you for your support ticket. Could you send us a speedtest (speedtest.net screenshot)?"}
  
 Rules:
+- Always reply in the same language the tenant used to write their message.
+  If they wrote in Dutch, reply in Dutch. If English, reply in English. Match
+  their language exactly, even though these instructions are in English.
 - If the ticket is about WiFi, internet, or network connectivity being slow or not working,
   set category to "wifi_or_internet" and write a reply asking the tenant to send: a speedtest
   screenshot (from speedtest.net), their address, and their IP address.
