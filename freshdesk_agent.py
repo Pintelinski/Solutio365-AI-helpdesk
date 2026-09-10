@@ -72,27 +72,45 @@ def classify_and_draft_reply(description: str) -> dict:
             {"role": "user", "content": description},
         ],
         format="json",
+        think=False,
     )
-    print(f"Model response: {response}")
  
-    content = response["message"]["content"]
-    try:
-        result = json.loads(content)
-    except json.JSONDecodeError:
-        print(f"Model returned non-JSON output, falling back to human handoff: {content}")
+    content = response.message.content
+    print(f"Model raw output: {content!r}")
+ 
+    result = _parse_model_json(content)
+    if result is None or result.get("category") not in ("wifi_or_internet", "other") or "reply" not in result:
+        print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
         return {
             "category": "other",
             "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
         }
  
-    if result.get("category") not in ("wifi_or_internet", "other") or "reply" not in result:
-        print(f"Model returned unexpected shape, falling back to human handoff: {result}")
-        return {
-            "category": "other",
-            "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
-        }
-
     return result
+
+
+def _parse_model_json(content: str) -> dict | None:
+    """Parse the model's JSON output, tolerating extra text around it.
+ 
+    Known Ollama issue: format="json" isn't always reliably enforced for
+    Qwen3.5 when think=False, so the model can occasionally wrap the JSON
+    in stray text. This tries a plain parse first, then falls back to
+    extracting the first {...} block before giving up.
+    """
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+ 
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(content[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+ 
+    return None
 
 
 def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
@@ -119,7 +137,6 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
         timeout=15,
     )
 
-    print(response)
     response.raise_for_status()
     assign_agent.raise_for_status()
     assign_employee.raise_for_status()
@@ -134,7 +151,6 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     decision = classify_and_draft_reply(description)
     assign = 1 if decision["category"] == "wifi_or_internet" else 2
     reply_message = decision["reply"]
-    print(decision)
  
     try:
         reply_to_ticket(ticket_id, reply_message, assign)
