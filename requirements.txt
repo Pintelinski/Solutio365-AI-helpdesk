@@ -1,3 +1,5 @@
 fastapi
 requests
 uvicorn
+ngrok
+python-dotenv
