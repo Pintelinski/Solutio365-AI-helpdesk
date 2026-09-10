@@ -73,6 +73,7 @@ def classify_and_draft_reply(description: str) -> dict:
         ],
         format="json",
     )
+    print(f"Model response: {response}")
  
     content = response["message"]["content"]
     try:
