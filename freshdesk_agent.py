@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
 import os
 import json
 import secrets
@@ -126,25 +126,31 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     return {"reply": response.json(), "assign": assigning.json()}
 
 
-@app.post("/freshdesk-webhook", status_code=202)
-async def receive_ticket(request: Request, authorized: bool = Depends(verify_webhook_auth)):
-    payload = await request.json()
-    print(f"Received webhook payload: {payload}")
-
-    ticket_id = payload.get("ticket_id")
-    requester_email = payload.get("requester_email")
-    description = payload.get("description_text")
-
+def process_ticket(ticket_id: int, requester_email: str, description: str) -> None:
+    """Runs the slow AI classification + Freshdesk reply after the webhook
+    has already been acknowledged, so Freshdesk/the sender never times out
+    waiting on the model."""
     decision = classify_and_draft_reply(description)
     assign = 1 if decision["category"] == "wifi_or_internet" else 2
     reply_message = decision["reply"]
  
     try:
-        reply_to_ticket(int(ticket_id), reply_message, assign)
+        reply_to_ticket(ticket_id, reply_message, assign)
         target = "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
-        raise HTTPException(status_code=502, detail="Failed to send reply via Freshdesk")
+
+
+@app.post("/freshdesk-webhook", status_code=202)
+async def receive_ticket(request: Request, background_tasks: BackgroundTasks, authorized: bool = Depends(verify_webhook_auth)):
+    payload = await request.json()
+    print(f"Received webhook payload: {payload}")
  
-    return {"status": "replied", "ticket_id": int(ticket_id), "email": requester_email, "category": decision["category"]}
+    ticket_id = payload.get("ticket_id")
+    requester_email = payload.get("requester_email")
+    description = payload.get("description_text")
+ 
+    background_tasks.add_task(process_ticket, int(ticket_id), requester_email, description)
+ 
+    return {"status": "accepted", "ticket_id": int(ticket_id)}
