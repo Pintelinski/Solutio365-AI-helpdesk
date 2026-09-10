@@ -40,8 +40,8 @@ def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ngrok.set_auth_token(os.getenv("NGROK_AUTHTOKEN", ""))
-    forward_kwargs = {"addr": "127.0.0.1:8085", "authtoken_from_env": True}
+    ngrok.set_auth_token(os.getenv("NGROK_AUTHTOKEN"))
+    forward_kwargs = {"addr": "127.0.0.1:8085"}
     if NGROK_DOMAIN:
         forward_kwargs["domain"] = NGROK_DOMAIN
     forwarder = await ngrok.forward(**forward_kwargs)
