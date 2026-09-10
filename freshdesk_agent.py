@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException, Request, Depends
 import os
+import json
 import secrets
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import requests
 import ngrok
+import ollama
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 
@@ -22,6 +25,13 @@ AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 WEBHOOK_USERNAME = os.getenv("WEBHOOK_USERNAME")
 WEBHOOK_PASSWORD = os.getenv("WEBHOOK_PASSWORD")
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN")
+
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+ollama_client = ollama.Client(host=OLLAMA_HOST)
+
+PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "classification_system_prompt.txt"
+CLASSIFICATION_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
 security = HTTPBasic()
 
@@ -49,7 +59,40 @@ async def lifespan(app: FastAPI):
     yield
     ngrok.disconnect()
 
+
 app = FastAPI(lifespan=lifespan)
+
+
+def classify_and_draft_reply(description: str) -> dict:
+    """Ask the local model to classify the ticket and draft a reply."""
+    response = ollama_client.chat(
+        model=OLLAMA_MODEL,
+        messages=[
+            {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+            {"role": "user", "content": description},
+        ],
+        format="json",
+    )
+ 
+    content = response["message"]["content"]
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        print(f"Model returned non-JSON output, falling back to human handoff: {content}")
+        return {
+            "category": "other",
+            "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
+        }
+ 
+    if result.get("category") not in ("wifi_or_internet", "other") or "reply" not in result:
+        print(f"Model returned unexpected shape, falling back to human handoff: {result}")
+        return {
+            "category": "other",
+            "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
+        }
+ 
+    return result
+
 
 def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
@@ -78,16 +121,12 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     response.raise_for_status()
     assign_agent.raise_for_status()
     assign_employee.raise_for_status()
-    if assign == 1:
-        assigning = assign_agent
-    else:
-        assigning = assign_employee
+    assigning = assign_agent if assign == 1 else assign_employee
     return {"reply": response.json(), "assign": assigning.json()}
 
 
 @app.post("/freshdesk-webhook", status_code=202)
 async def receive_ticket(request: Request, authorized: bool = Depends(verify_webhook_auth)):
-    raw_payload = await request.body()
     payload = await request.json()
     print(f"Received webhook payload: {payload}")
 
@@ -95,22 +134,16 @@ async def receive_ticket(request: Request, authorized: bool = Depends(verify_web
     requester_email = payload.get("requester_email")
     description = payload.get("description_text")
 
-    if "wifi" in description.lower() or "internet" in description.lower():
-        assign = 1  # Assign to AI agent
-        reply_message = (f"Hi, thanks for reaching out. Could you send us a screenshot of a "
-                "speedtest, your address, and your IP address so we can look into this?")
-    else:
-        assign = 2  # Assign to human employee
-        reply_message = (f"Hi, thanks for reaching out. Our employees will contact you soon.")
+    decision = classify_and_draft_reply(description)
+    assign = 1 if decision["category"] == "wifi_or_internet" else 2
+    reply_message = decision["reply"]
  
     try:
         reply_to_ticket(int(ticket_id), reply_message, assign)
-        if assign == 1:
-            print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the AI agent.")
-        else:
-            print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the human employee.")
+        target = "AI agent" if assign == 1 else "human employee"
+        print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
         raise HTTPException(status_code=502, detail="Failed to send reply via Freshdesk")
  
-    return {"status": "replied", "ticket_id": int(ticket_id), "email": requester_email}
+    return {"status": "replied", "ticket_id": int(ticket_id), "email": requester_email, "category": decision["category"]}
