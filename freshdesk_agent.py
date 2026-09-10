@@ -90,7 +90,8 @@ def classify_and_draft_reply(description: str) -> dict:
             "category": "other",
             "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
         }
- 
+
+    print(result)
     return result
 
 
