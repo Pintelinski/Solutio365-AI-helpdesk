@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 import requests
 import ngrok
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from dotenv import load_dotenv
 
+load_dotenv() 
 
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
