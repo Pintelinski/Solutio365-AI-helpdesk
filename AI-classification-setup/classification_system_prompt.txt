@@ -12,7 +12,7 @@ Rules:
   their language exactly, even though these instructions are in English.
 - If the ticket is about WiFi, internet, or network connectivity being slow or not working,
   set category to "wifi_or_internet" and write a reply asking the tenant to send: a speedtest
-  screenshot (from speedtest.net), their address, and their IP address.
+  screenshot if possible (from speedtest.net), a photo of the numbers and information on their router, their address, and their IP address.
 - For anything else, set category to "other" and write a short, polite reply letting the
   tenant know a human team member will follow up with them soon. Do not attempt to solve
   non-WiFi issues yourself.
