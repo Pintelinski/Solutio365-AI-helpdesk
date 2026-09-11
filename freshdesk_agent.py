@@ -41,7 +41,7 @@ def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -
     Automation's 'Authentication' field - separate from the Freshdesk API key."""
     if not WEBHOOK_USERNAME or not WEBHOOK_PASSWORD:
         raise RuntimeError("WEBHOOK_USERNAME and WEBHOOK_PASSWORD must be configured")
- 
+
     valid_user = secrets.compare_digest(credentials.username, WEBHOOK_USERNAME)
     valid_pass = secrets.compare_digest(credentials.password, WEBHOOK_PASSWORD)
     if not (valid_user and valid_pass):
@@ -78,10 +78,10 @@ def classify_and_draft_reply(description: str) -> dict:
     thinking = getattr(response.message, "thinking", None)
     if thinking:
         print(f"Model reasoning (not sent to tenant): {thinking}")
- 
+
     content = response.message.content
     print(f"Model raw output: {content!r}")
- 
+
     result = _parse_model_json(content)
     if result is None or result.get("category") not in ("wifi_or_internet", "other") or "reply" not in result:
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
@@ -89,7 +89,7 @@ def classify_and_draft_reply(description: str) -> dict:
             "category": "other",
             "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
         }
- 
+
     return result
 
 
@@ -105,7 +105,7 @@ def _parse_model_json(content: str) -> dict | None:
         return json.loads(content)
     except json.JSONDecodeError:
         pass
- 
+
     start = content.find("{")
     end = content.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -113,7 +113,7 @@ def _parse_model_json(content: str) -> dict | None:
             return json.loads(content[start:end + 1])
         except json.JSONDecodeError:
             pass
- 
+
     return None
 
 
@@ -121,7 +121,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
- 
+
     response = requests.post(
         f"{BASE_URL}/tickets/{ticket_id}/reply",
         auth=AUTH,
@@ -155,7 +155,7 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     decision = classify_and_draft_reply(description)
     assign = 1 if decision["category"] == "wifi_or_internet" else 2
     reply_message = decision["reply"]
- 
+
     try:
         reply_to_ticket(ticket_id, reply_message, assign)
         target = "AI agent" if assign == 1 else "human employee"
@@ -172,7 +172,7 @@ async def receive_ticket(request: Request, background_tasks: BackgroundTasks, au
     ticket_id = payload.get("ticket_id")
     requester_email = payload.get("requester_email")
     description = payload.get("description_text")
- 
+
     background_tasks.add_task(process_ticket, int(ticket_id), requester_email, description)
  
     return {"status": "accepted", "ticket_id": int(ticket_id)}
