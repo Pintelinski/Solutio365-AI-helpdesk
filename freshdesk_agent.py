@@ -73,7 +73,8 @@ def classify_and_draft_reply(description: str) -> dict:
         ],
         format="json",
         think=False,
-        options={"num_ctx": 16384}
+        options={"num_ctx": 16384},
+        temperature=0
     )
 
     thinking = getattr(response.message, "thinking", None)
