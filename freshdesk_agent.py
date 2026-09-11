@@ -73,6 +73,7 @@ def classify_and_draft_reply(description: str) -> dict:
         ],
         format="json",
         think=True,
+        options={"num_ctx": 4096}
     )
 
     thinking = getattr(response.message, "thinking", None)
@@ -128,24 +129,18 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
         json={"body": message_html},
         timeout=15,
     )
-    assign_agent = requests.put(
-        f"{BASE_URL}/tickets/{ticket_id}",
-        auth=AUTH,
-        json={"responder_id": SUPPORT_AGENT_ID},
-        timeout=15,
-    )
-    assign_employee = requests.put(
-        f"{BASE_URL}/tickets/{ticket_id}",
-        auth=AUTH,
-        json={"responder_id": SUPPORT_EMPLOYEE_ID},
-        timeout=15,
-    )
-
     response.raise_for_status()
-    assign_agent.raise_for_status()
-    assign_employee.raise_for_status()
-    assigning = assign_agent if assign == 1 else assign_employee
-    return {"reply": response.json(), "assign": assigning.json()}
+
+    responder_id = SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID
+    assign_response = requests.put(
+        f"{BASE_URL}/tickets/{ticket_id}",
+        auth=AUTH,
+        json={"responder_id": responder_id},
+        timeout=15,
+    )
+    assign_response.raise_for_status()
+
+    return {"reply": response.json(), "assign": assign_response.json()}
 
 
 def process_ticket(ticket_id: int, requester_email: str, description: str) -> None:
