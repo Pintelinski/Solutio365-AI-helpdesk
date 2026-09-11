@@ -72,8 +72,8 @@ def classify_and_draft_reply(description: str) -> dict:
             {"role": "user", "content": description},
         ],
         format="json",
-        think="low",
-        options={"num_ctx": 4096}
+        think="high",
+        options={"num_ctx": 8192}
     )
 
     thinking = getattr(response.message, "thinking", None)
