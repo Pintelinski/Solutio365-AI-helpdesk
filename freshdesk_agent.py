@@ -72,7 +72,7 @@ def classify_and_draft_reply(description: str) -> dict:
             {"role": "user", "content": description},
         ],
         format="json",
-        think="high",
+        think=False,
         options={"num_ctx": 16384}
     )
 
