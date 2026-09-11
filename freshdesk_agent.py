@@ -123,10 +123,12 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
 
+    message_text = message_html.replace("\n", "<br>")
+
     response = requests.post(
         f"{BASE_URL}/tickets/{ticket_id}/reply",
         auth=AUTH,
-        json={"body": message_html},
+        json={"body": message_text},
         timeout=15,
     )
     response.raise_for_status()
