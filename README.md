@@ -4,34 +4,108 @@ Internship project where I need to make an open-source AI agent that will handle
 
 ## Code Setup
 
-1. Install the dependencies:
+### Install Dependencies
 
-	```powershell
-	pip install -r requirements.txt
-	```
+Create and activate a virtual environment, then install the Python dependencies:
 
-2. Set the Freshdesk environment variables in the same terminal:
-
-	```powershell
-	$env:FRESHDESK_DOMAIN = "yourcompany"
-	$env:FRESHDESK_API_KEY = "your-api-key"
-	```
-
-	`FRESHDESK_PASSWORD` is optional; Freshdesk accepts any password value when authenticating with an API key.
-
-3. Start the webhook server:
-
-	```powershell
-	uvicorn freshdesk_agent:app --host 0.0.0.0 --port 8085 --env-file .env
-	```
-
-Freshdesk should send its automation webhook to:
-
-```text
-http://<your-public-host>:8000/freshdesk-webhook
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-The endpoint accepts a top-level `ticket_id` or a nested `ticket.id`, retrieves the full ticket through the Freshdesk API, and returns the received ticket information. The server must be publicly reachable; for local testing, use a tunnel such as ngrok or Cloudflare Tunnel.
+The application uses FastAPI/Uvicorn for the webhook, `requests` for Freshdesk API calls, the ngrok Python SDK for the tunnel, `python-dotenv` for local configuration, and the Ollama Python client for local model inference.
+
+### Configure Environment
+
+Copy the example configuration and fill in the real values:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Required Freshdesk and webhook settings:
+
+```dotenv
+FRESHDESK_DOMAIN=yourcompany
+FRESHDESK_API_KEY=your-api-key
+FRESHDESK_PASSWORD=X
+SUPPORT_AGENT_ID=1234567890
+SUPPORT_EMPLOYEE_ID=1234567891
+WEBHOOK_USERNAME=webhook-username
+WEBHOOK_PASSWORD=webhook-password
+```
+
+The webhook username and password are credentials you create for Freshdesk's webhook authentication. They are separate from the Freshdesk API key. The two support IDs are Freshdesk responder IDs: one for the AI agent and one for the human employee.
+
+For the embedded ngrok tunnel, also configure:
+
+```dotenv
+NGROK_DOMAIN=your-free-ngrok-domain.ngrok-free.dev
+NGROK_AUTHTOKEN=your-ngrok-authtoken
+```
+
+For Ollama, configure the host and model that are available to the machine running this application:
+
+```dotenv
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=qwen3.5:4b
+```
+
+The file `AI-classification-setup/classification_system_prompt.txt` must exist. It defines the JSON categories and reply rules used by the model. Keep `.env` out of version control and never commit API keys, passwords, or tokens.
+
+### Freshdesk Webhook
+
+Configure a Freshdesk automation that triggers when a ticket is created and sends a `POST` request to:
+
+```text
+https://your-ngrok-domain.ngrok-free.dev/freshdesk-webhook
+```
+
+Use the webhook username and password from `.env` for Basic Authentication, set the content type to `application/json`, and use this body:
+
+```json
+{
+    "ticket_id": "{{ticket.id}}",
+    "subject": "{{ticket.subject}}",
+    "description_text": "{{ticket.description_text}}",
+    "requester_email": "{{ticket.requester.email}}",
+    "requester_name": "{{ticket.requester.name}}",
+    "priority": "{{ticket.priority}}"
+}
+```
+
+The endpoint validates the JSON object and ticket ID, prints the received payload, and returns `202 Accepted`. It then processes the ticket in a background task so Freshdesk does not wait for Ollama or the Freshdesk API operations.
+
+### Processing Flow
+
+For each accepted webhook, the application:
+
+1. Fetches the complete Freshdesk ticket.
+2. Finds traditional image attachments and inline images in the HTML description.
+3. Downloads those images into `attachments/<ticket-id>/`.
+4. Sends the ticket description and available images to Ollama.
+5. Expects one of four categories: `wifi_info_needed`, `wifi_resolved`, `wifi_escalate`, or `other`.
+6. Posts the model's public reply to Freshdesk.
+7. Assigns the ticket to `SUPPORT_AGENT_ID` for `wifi_info_needed` and `wifi_resolved`; all other categories go to `SUPPORT_EMPLOYEE_ID`.
+
+The reply and assignment are outbound Freshdesk API requests, so Uvicorn logs the incoming webhook as `POST /freshdesk-webhook`; it does not log the outbound Freshdesk `POST` and `PUT` as server requests.
+
+### Local Checks
+
+Check that the app imports and compiles:
+
+```powershell
+python -m py_compile freshdesk_agent.py
+```
+
+After the server is running, FastAPI documentation is available at:
+
+```text
+http://127.0.0.1:8085/docs
+```
+
+The public URL printed during startup must be reachable before configuring it in Freshdesk. If a webhook body is invalid JSON, the application logs its raw bytes and returns `400`. If Freshdesk API or attachment processing fails after acknowledgement, the details are printed in the server terminal.
 
 ## Server Setup
 

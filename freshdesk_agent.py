@@ -95,7 +95,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
         print(f"Model reasoning (not sent to tenant): {thinking}")
 
     content = response.message.content
-    print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
     if result is None or result.get("category") not in ("wifi_info_needed", "wifi_resolved", "wifi_escalate", "other") or "reply" not in result:
@@ -174,7 +173,6 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             file_path = ticket_dir / name
             file_path.write_bytes(img_response.content)
             saved_paths.append(file_path)
-            print(f"Saved image attachment: {file_path}")
         except requests.exceptions.RequestException as e:
             print(f"Failed to download attachment {name}: {e}")
 
@@ -186,7 +184,6 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             file_path = ticket_dir / f"inline_{i}.png"
             file_path.write_bytes(img_response.content)
             saved_paths.append(file_path)
-            print(f"Saved inline image: {file_path}")
         except requests.exceptions.RequestException as e:
             print(f"Failed to download inline image from {url}: {e}")
 
