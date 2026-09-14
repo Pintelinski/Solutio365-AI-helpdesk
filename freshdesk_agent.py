@@ -98,7 +98,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
     print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
-    if result is None or result.get("category") not in ("wifi_info_needed", "wifi_escalate", "other") or "reply" not in result:
+    if result is None or result.get("category") not in ("wifi_info_needed", "wifi_resolved", "wifi_escalate", "other") or "reply" not in result:
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
         return {
             "category": "other",
@@ -168,7 +168,6 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
         if not url:
             continue
         try:
-            # attachment_url is pre-signed and time-limited - no auth needed
             img_response = requests.get(url, timeout=15)
             img_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -181,8 +180,6 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
 
     for i, url in enumerate(inline_image_urls):
         try:
-            # Inline images are hosted on Freshdesk's own domain and require
-            # our Freshdesk API credentials, unlike pre-signed attachment_url links.
             img_response = requests.get(url, auth=AUTH, timeout=15)
             img_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -232,7 +229,7 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths)
-    assign = 1 if decision["category"] == "wifi_info_needed" else 2
+    assign = 1 if decision["category"] in ("wifi_info_needed", "wifi_resolved") else 2
     reply_message = decision["reply"]
 
     try:
