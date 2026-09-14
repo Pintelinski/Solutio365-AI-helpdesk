@@ -69,7 +69,12 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
-    user_message = {"role": "user", "content": description}
+    if image_paths:
+        message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
+    else:
+        message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
+ 
+    user_message = {"role": "user", "content": message_text}
     if image_paths:
         user_message["images"] = [path.read_bytes() for path in image_paths]
 
@@ -92,7 +97,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
     print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
-    if result is None or result.get("category") not in ("wifi_or_internet", "other") or "reply" not in result:
+    if result is None or result.get("category") not in ("wifi_info_needed", "wifi_escalate", "other") or "reply" not in result:
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
         return {
             "category": "other",
@@ -132,8 +137,10 @@ def get_ticket_attachments(ticket_id: int) -> list[dict]:
     response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
     response.raise_for_status()
     ticket = response.json()
+    print(f"Ticket {ticket_id} full response keys: {list(ticket.keys())}")
+    print(f"Ticket {ticket_id} attachments field: {ticket.get('attachments')}")
+    print(f"Ticket {ticket_id} cloud_files field: {ticket.get('cloud_files')}")
     return ticket.get("attachments", [])
-
 
 def download_image_attachments(ticket_id: int, attachments: list[dict]) -> list[Path]:
     """Download image attachments to disk, grouped in a per-ticket folder
