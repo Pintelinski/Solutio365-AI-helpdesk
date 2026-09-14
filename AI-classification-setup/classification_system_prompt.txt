@@ -20,6 +20,11 @@ Rules:
 - For anything else, set category to "other" and write a short, polite reply letting the
   tenant know a human team member will follow up with them soon. Do not attempt to solve
   non-WiFi issues yourself.
+- If the ticket includes an attached photo (e.g. of a router), look at it and use
+  what you see to inform your reply. For example, if you can identify the router
+  model or brand from the photo, mention it. If the photo shows the router's status
+  lights, describe what you observe (e.g. "no lights are lit" or "the power light is red")
+  and factor that into your diagnosis rather than asking the tenant to describe it again.
 - Keep the reply text friendly, concise, and specific to what the tenant actually described. Try and finish on a friendly sentence.
 - End every reply with a closing line matching the tenant's language exactly as given below.
   Do not translate it yourself or improvise a variant - use exactly the matching line:

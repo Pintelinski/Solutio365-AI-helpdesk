@@ -27,11 +27,13 @@ WEBHOOK_PASSWORD = os.getenv("WEBHOOK_PASSWORD")
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN")
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "classification_system_prompt.txt"
 CLASSIFICATION_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
+
+ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 security = HTTPBasic()
 
@@ -63,13 +65,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-def classify_and_draft_reply(description: str) -> dict:
-    """Ask the local model to classify the ticket and draft a reply."""
+def classify_and_draft_reply(description: str, image_paths: list[Path] | None = None) -> dict:
+    """Ask the local model to classify the ticket and draft a reply.
+    If image_paths is given, the images are attached to the user message so
+    the model can look at them directly (e.g. a photo of a router)."""
+    user_message = {"role": "user", "content": description}
+    if image_paths:
+        user_message["images"] = [path.read_bytes() for path in image_paths]
+
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
-            {"role": "user", "content": description},
+            user_message,
         ],
         format="json",
         think=False,
@@ -117,6 +125,46 @@ def _parse_model_json(content: str) -> dict | None:
 
     return None
 
+def get_ticket_attachments(ticket_id: int) -> list[dict]:
+    """Fetch the full ticket from Freshdesk and return its attachment metadata.
+    The webhook payload doesn't include attachments, so this is a separate
+    API call made after the webhook fires."""
+    response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
+    response.raise_for_status()
+    ticket = response.json()
+    return ticket.get("attachments", [])
+
+
+def download_image_attachments(ticket_id: int, attachments: list[dict]) -> list[Path]:
+    """Download image attachments to disk, grouped in a per-ticket folder
+    (attachments/<ticket_id>/) so they can be found and deleted later once
+    the ticket is resolved. Freshdesk's attachment_url is a pre-signed,
+    time-limited URL - a plain GET works, no Freshdesk API credentials
+    needed for this specific download."""
+    ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
+    saved_paths = []
+
+    for attachment in attachments:
+        content_type = attachment.get("content_type", "")
+        if not content_type.startswith("image/"):
+            continue
+        url = attachment.get("attachment_url")
+        name = attachment.get("name", "attachment")
+        if not url:
+            continue
+        try:
+            img_response = requests.get(url, timeout=15)
+            img_response.raise_for_status()
+            ticket_dir.mkdir(parents=True, exist_ok=True)
+            file_path = ticket_dir / name
+            file_path.write_bytes(img_response.content)
+            saved_paths.append(file_path)
+            print(f"Saved image attachment: {file_path}")
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to download attachment {name}: {e}")
+
+    return saved_paths
+
 
 def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
@@ -149,7 +197,11 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     """Runs the slow AI classification + Freshdesk reply after the webhook
     has already been acknowledged, so Freshdesk/the sender never times out
     waiting on the model."""
-    decision = classify_and_draft_reply(description)
+    attachments = get_ticket_attachments(ticket_id)
+    image_paths = download_image_attachments(ticket_id, attachments)
+    print(f"Ticket {ticket_id}: saved {len(image_paths)} image attachment(s) to {ATTACHMENTS_DIR / str(ticket_id)}")
+
+    decision = classify_and_draft_reply(description, image_paths)
     assign = 1 if decision["category"] == "wifi_or_internet" else 2
     reply_message = decision["reply"]
 
