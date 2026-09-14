@@ -27,7 +27,7 @@ WEBHOOK_PASSWORD = os.getenv("WEBHOOK_PASSWORD")
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN")
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
 ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "classification_system_prompt.txt"
