@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
 import os
 import json
 import secrets
+import re
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -73,7 +74,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
     else:
         message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
- 
+
     user_message = {"role": "user", "content": message_text}
     if image_paths:
         user_message["images"] = [path.read_bytes() for path in image_paths]
@@ -109,7 +110,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
 
 def _parse_model_json(content: str) -> dict | None:
     """Parse the model's JSON output, tolerating extra text around it.
- 
+
     Known Ollama issue: format="json" isn't always reliably enforced for
     Qwen3.5 when think=False, so the model can occasionally wrap the JSON
     in stray text. This tries a plain parse first, then falls back to
@@ -130,24 +131,31 @@ def _parse_model_json(content: str) -> dict | None:
 
     return None
 
-def get_ticket_attachments(ticket_id: int) -> list[dict]:
-    """Fetch the full ticket from Freshdesk and return its attachment metadata.
-    The webhook payload doesn't include attachments, so this is a separate
-    API call made after the webhook fires."""
+
+def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
+    """Fetch the full ticket from Freshdesk and return both:
+    - traditional file attachments (from the 'attachments' field)
+    - inline image URLs pasted directly into the email body (Freshdesk embeds
+      these as <img> tags in the HTML 'description' field, not in
+      'attachments' - this is the common case for copy-pasted screenshots).
+    """
     response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
     response.raise_for_status()
     ticket = response.json()
-    print(f"Ticket {ticket_id} full response keys: {list(ticket.keys())}")
-    print(f"Ticket {ticket_id} attachments field: {ticket.get('attachments')}")
-    print(f"Ticket {ticket_id} cloud_files field: {ticket.get('cloud_files')}")
-    return ticket.get("attachments", [])
 
-def download_image_attachments(ticket_id: int, attachments: list[dict]) -> list[Path]:
-    """Download image attachments to disk, grouped in a per-ticket folder
-    (attachments/<ticket_id>/) so they can be found and deleted later once
-    the ticket is resolved. Freshdesk's attachment_url is a pre-signed,
-    time-limited URL - a plain GET works, no Freshdesk API credentials
-    needed for this specific download."""
+    attachments = ticket.get("attachments", [])
+
+    description_html = ticket.get("description", "") or ""
+    inline_image_urls = re.findall(r'<img[^>]+src="([^"]+)"', description_html)
+
+    print(f"Ticket {ticket_id}: {len(attachments)} file attachment(s), {len(inline_image_urls)} inline image(s) in body")
+    return attachments, inline_image_urls
+
+
+def download_image_attachments(ticket_id: int, attachments: list[dict], inline_image_urls: list[str]) -> list[Path]:
+    """Download both traditional file attachments and inline pasted images
+    to disk, grouped in a per-ticket folder (attachments/<ticket_id>/) so
+    they can be found and deleted later once the ticket is resolved."""
     ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
     saved_paths = []
 
@@ -160,6 +168,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict]) -> list[
         if not url:
             continue
         try:
+            # attachment_url is pre-signed and time-limited - no auth needed
             img_response = requests.get(url, timeout=15)
             img_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +178,20 @@ def download_image_attachments(ticket_id: int, attachments: list[dict]) -> list[
             print(f"Saved image attachment: {file_path}")
         except requests.exceptions.RequestException as e:
             print(f"Failed to download attachment {name}: {e}")
+
+    for i, url in enumerate(inline_image_urls):
+        try:
+            # Inline images are hosted on Freshdesk's own domain and require
+            # our Freshdesk API credentials, unlike pre-signed attachment_url links.
+            img_response = requests.get(url, auth=AUTH, timeout=15)
+            img_response.raise_for_status()
+            ticket_dir.mkdir(parents=True, exist_ok=True)
+            file_path = ticket_dir / f"inline_{i}.png"
+            file_path.write_bytes(img_response.content)
+            saved_paths.append(file_path)
+            print(f"Saved inline image: {file_path}")
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to download inline image from {url}: {e}")
 
     return saved_paths
 
@@ -204,12 +227,12 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     """Runs the slow AI classification + Freshdesk reply after the webhook
     has already been acknowledged, so Freshdesk/the sender never times out
     waiting on the model."""
-    attachments = get_ticket_attachments(ticket_id)
-    image_paths = download_image_attachments(ticket_id, attachments)
-    print(f"Ticket {ticket_id}: saved {len(image_paths)} image attachment(s) to {ATTACHMENTS_DIR / str(ticket_id)}")
+    attachments, inline_image_urls = get_ticket_attachments(ticket_id)
+    image_paths = download_image_attachments(ticket_id, attachments, inline_image_urls)
+    print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths)
-    assign = 1 if decision["category"] == "wifi_or_internet" else 2
+    assign = 1 if decision["category"] == "wifi_info_needed" else 2
     reply_message = decision["reply"]
 
     try:
@@ -224,11 +247,11 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
 async def receive_ticket(request: Request, background_tasks: BackgroundTasks, authorized: bool = Depends(verify_webhook_auth)):
     payload = await request.json()
     print(f"Received webhook payload: {payload}")
- 
+
     ticket_id = payload.get("ticket_id")
     requester_email = payload.get("requester_email")
     description = payload.get("description_text")
 
     background_tasks.add_task(process_ticket, int(ticket_id), requester_email, description)
- 
+
     return {"status": "accepted", "ticket_id": int(ticket_id)}
