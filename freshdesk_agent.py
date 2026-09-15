@@ -104,6 +104,8 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
     """Embed the ticket text and find the most similar known issues in Chroma.
     Returns a formatted text block to inject into the prompt, or an empty
     string if nothing relevant enough is found."""
+    if not description or not description.strip():
+        return ""
     query_embedding = ollama_client.embeddings(model=EMBED_MODEL, prompt=description)["embedding"]
     results = known_issues_collection.query(query_embeddings=[query_embedding], n_results=n_results)
  
@@ -120,7 +122,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
-    relevant_issues = retrieve_relevant_issues(description)
+    retrieval_query = description if description.strip() else pdf_text
+    relevant_issues = retrieve_relevant_issues(retrieval_query)
 
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
