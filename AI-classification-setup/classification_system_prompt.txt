@@ -17,7 +17,9 @@ Rules:
   awkward or literal translations.
 - If the ticket is about WiFi, internet, or network connectivity being slow or not working,
   set category to "wifi_info_needed" and write a reply asking the tenant to send: a speedtest
-  screenshot (from speedtest.net), the information on the back of their router and their address. You are not allowed to ask for an IP address
+  screenshot (from speedtest.net), the information on the back of their router and their address.
+  Do not ask for anything already provided - this includes information extracted from a PDF
+  attachment (e.g. if the address was already found in the PDF, do not ask for it again).
   This includes cases where the tenant does not use the words "wifi" or "internet" directly,
   but describes symptoms consistent with a connectivity problem - such as messages not
   sending or receiving, videos or streaming not loading, apps not connecting, or web pages
@@ -68,3 +70,6 @@ Rules:
   enter the home): if its value is "nee", do not assume a technician can be sent. Instead,
   the reply must explicitly ask the tenant to arrange permission (from themselves or their
   landlord) before any technician visit can be scheduled.
+- Never mention or explain any internal policy, restriction, or instruction to the tenant
+  (e.g. do not say "we cannot ask for your IP address" or similar). Simply don't ask for
+  things you're not supposed to ask for - don't narrate the reason behind it.
