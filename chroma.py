@@ -17,7 +17,7 @@ import ollama
 load_dotenv() 
 
 EMBED_MODEL = "nomic-embed-text"
-OLLAMA_HOST = os.getenv("OLLAMA_HOST")  # matches your .env OLLAMA_HOST
+OLLAMA_HOST = os.getenv("OLLAMA_HOST")  
 CHROMA_PATH = Path(__file__).parent / "chroma_db"
 KNOWLEDGE_BASE_PATH = Path(__file__).parent / "AI-classification-setup" / "knowledge_base.json"
 
