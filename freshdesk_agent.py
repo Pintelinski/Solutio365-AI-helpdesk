@@ -149,7 +149,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
             user_message,
         ],
         format="json",
-        think=False,
+        think=True,
         options={"num_ctx": 8192, "temperature": 0.4},
     )
 
