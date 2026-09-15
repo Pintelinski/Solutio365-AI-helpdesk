@@ -4,3 +4,4 @@ uvicorn
 ngrok
 python-dotenv
 ollama
+chromadb

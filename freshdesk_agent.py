@@ -9,10 +9,11 @@ from contextlib import asynccontextmanager
 import requests
 import ngrok
 import ollama
+import chromadb
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 
-load_dotenv() 
+load_dotenv()
 
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
@@ -33,6 +34,11 @@ ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "classification_system_prompt.txt"
 CLASSIFICATION_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
+
+EMBED_MODEL = "nomic-embed-text"
+CHROMA_PATH = Path(__file__).parent / "chroma_db"
+chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
@@ -65,15 +71,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
+    """Embed the ticket text and find the most similar known issues in Chroma.
+    Returns a formatted text block to inject into the prompt, or an empty
+    string if nothing relevant enough is found."""
+    query_embedding = ollama_client.embeddings(model=EMBED_MODEL, prompt=description)["embedding"]
+    results = known_issues_collection.query(query_embeddings=[query_embedding], n_results=n_results)
+ 
+    if not results["documents"] or not results["documents"][0]:
+        return ""
+ 
+    blocks = []
+    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+        blocks.append(f"- Known pattern: {doc}\n  Suggested category: {meta['category']}\n  Guidance: {meta['guidance']}")
+ 
+    return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
 
 def classify_and_draft_reply(description: str, image_paths: list[Path] | None = None) -> dict:
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
+    relevant_issues = retrieve_relevant_issues(description)
+
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
     else:
         message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
+
+    if relevant_issues:
+        message_text += f"\n\n{relevant_issues}"
 
     user_message = {"role": "user", "content": message_text}
     if image_paths:

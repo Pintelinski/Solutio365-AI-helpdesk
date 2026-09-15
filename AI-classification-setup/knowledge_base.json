@@ -1,0 +1,38 @@
+[
+  {
+    "id": "wifi_slow_generic",
+    "category": "wifi_info_needed",
+    "description": "Tenant reports slow WiFi with no further diagnostic details provided yet.",
+    "guidance": "Ask for a speedtest screenshot (speedtest.net), the tenant's address, and their IP address before diagnosing further."
+  },
+  {
+    "id": "wifi_symptoms_indirect",
+    "category": "wifi_info_needed",
+    "description": "Tenant describes symptoms like messages not sending, videos not loading, or apps not connecting, without naming wifi or internet directly.",
+    "guidance": "Recognize this as a likely connectivity issue even without the words 'wifi' or 'internet'. Ask for a speedtest screenshot, address, and IP address."
+  },
+  {
+    "id": "wifi_hardware_no_lights",
+    "category": "wifi_escalate",
+    "description": "Router shows no lights at all, or is unusually warm/hot to the touch, possibly smoking.",
+    "guidance": "Likely a dead power supply or hardware fault. Do not promise a technician directly - acknowledge the likely cause and say a team member will follow up with next steps, which may include a technician visit and landlord permission."
+  },
+  {
+    "id": "wifi_good_speedtest_weak_room",
+    "category": "wifi_resolved",
+    "description": "Speedtest shows good overall speed, but WiFi signal is weak in a specific room far from the router.",
+    "guidance": "Likely a range/placement issue, not a real outage. Suggest: moving the router to a more central location, reducing obstacles between router and the affected room, using 5GHz at close range vs 2.4GHz for range at a distance."
+  },
+  {
+    "id": "wifi_good_router_slow_overall",
+    "category": "wifi_resolved",
+    "description": "Router lights appear normal but speeds are still lower than expected overall (not room-specific).",
+    "guidance": "Suggest restarting the router (unplug 30 seconds, plug back in) and checking how many devices are connected at once."
+  },
+  {
+    "id": "non_wifi_general",
+    "category": "other",
+    "description": "Ticket is not related to WiFi or internet connectivity at all (e.g. intercom, general maintenance, billing questions).",
+    "guidance": "Do not attempt to solve this. Let the tenant know a human team member will follow up soon."
+  }
+]
