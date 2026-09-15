@@ -5,3 +5,4 @@ ngrok
 python-dotenv
 ollama
 chromadb
+pypdf

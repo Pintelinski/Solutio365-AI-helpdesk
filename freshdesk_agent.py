@@ -10,6 +10,7 @@ import requests
 import ngrok
 import ollama
 import chromadb
+from pypdf import PdfReader
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 
@@ -71,6 +72,34 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
+    """Download PDF attachments and extract their text content."""
+    ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
+    extracted_texts = []
+
+    for attachment in attachments:
+        if attachment.get("content_type") != "application/pdf":
+            continue
+        url = attachment.get("attachment_url")
+        name = attachment.get("name", "attachment.pdf")
+        if not url:
+            continue
+        try:
+            pdf_response = requests.get(url, timeout=15)
+            pdf_response.raise_for_status()
+            ticket_dir.mkdir(parents=True, exist_ok=True)
+            file_path = ticket_dir / name
+            file_path.write_bytes(pdf_response.content)
+
+            reader = PdfReader(file_path)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            extracted_texts.append(f"[PDF attachment '{name}']\n{text}")
+            print(f"Extracted text from PDF: {name} ({len(text)} chars)")
+        except Exception as e:
+            print(f"Failed to process PDF {name}: {e}")
+
+    return "\n\n".join(extracted_texts)
+
 def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
     """Embed the ticket text and find the most similar known issues in Chroma.
     Returns a formatted text block to inject into the prompt, or an empty
@@ -87,7 +116,7 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
  
     return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
 
-def classify_and_draft_reply(description: str, image_paths: list[Path] | None = None) -> dict:
+def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "") -> dict:
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
@@ -100,6 +129,11 @@ def classify_and_draft_reply(description: str, image_paths: list[Path] | None = 
 
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
+
+    if pdf_text:
+        message_text += f"\n\n{pdf_text}"
+    else:
+        message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
 
     user_message = {"role": "user", "content": message_text}
     if image_paths:
@@ -251,7 +285,8 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     image_paths = download_image_attachments(ticket_id, attachments, inline_image_urls)
     print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
-    decision = classify_and_draft_reply(description, image_paths)
+    pdf_text = download_and_extract_pdfs(ticket_id, attachments)
+    decision = classify_and_draft_reply(description, image_paths, pdf_text)
     assign = 1 if decision["category"] in ("wifi_info_needed", "wifi_resolved") else 2
     reply_message = decision["reply"]
 
