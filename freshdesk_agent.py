@@ -122,7 +122,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
-    retrieval_query = description if description.strip() else pdf_text
+    retrieval_query = f"{description}\n{pdf_text}".strip()
     relevant_issues = retrieve_relevant_issues(retrieval_query)
 
     if image_paths:
