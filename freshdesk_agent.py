@@ -44,7 +44,7 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 # --- TESTING OVERRIDE: remove this line before going live ---
-TEST_EMAIL_OVERRIDE = "pepijn090203@gmail.com"
+TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
 # ---------------------------------------------------------------
 EMAIL_PATTERN = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
 
@@ -155,7 +155,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         ],
         format="json",
         think=False,
-        options={"num_ctx": 4096, "temperature": 0.4, "num_thread": 6},
+        options={"num_ctx": 16384, "temperature": 0.4, "num_thread": 6},
     )
 
     thinking = getattr(response.message, "thinking", None)
