@@ -74,6 +74,13 @@ async def lifespan(app: FastAPI):
     yield
     ngrok.disconnect()
 
+PDF_FIELD_LABELS = {
+    "description": ["omschrijving", "Ömschrijving melding", "beschrijving", "problem description", "description"],
+    "location": ["adres", "locatie", "address", "location(s)"],
+    "email": ["email", "e-mail", "e-mailadres"],
+    "permission": ["toestemming om woning te betreden", "toestemming", "permission to enter"],
+}
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -98,12 +105,67 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
 
             reader = PdfReader(file_path)
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            extracted_texts.append(f"[PDF attachment '{name}']\n{text}")
-            print(f"Extracted text from PDF: {name} ({len(text)} chars)")
+            fields = extract_pdf_fields(text)
+            formatted = format_pdf_fields(fields)
+            if formatted:
+                extracted_texts.append(formatted)
+                print(f"Extracted fields from PDF {name}: {list(fields.keys())}")
+            else:
+                extracted_texts.append(f"[PDF attachment '{name}', fields not recognized]\n{text}")
+                print(f"No known fields matched in PDF {name}, using raw text as fallback")
         except Exception as e:
             print(f"Failed to process PDF {name}: {e}")
 
     return "\n\n".join(extracted_texts)
+
+
+def extract_pdf_fields(text: str) -> dict:
+    """Pull out only the fields we actually use from PDF form text, instead
+    of sending the whole raw PDF. Keeps input smaller/faster and removes
+    Dutch field labels from sitting next to content, which was confusing
+    the model's language detection."""
+    fields = {}
+    lines = text.split("\n")
+    all_labels = [l for labels in PDF_FIELD_LABELS.values() for l in labels]
+
+    for field_key, labels in PDF_FIELD_LABELS.items():
+        for i, line in enumerate(lines):
+            line_lower = line.strip().lower()
+            matched = next((l for l in labels if line_lower.startswith(l)), None)
+            if not matched:
+                continue
+            after_label = line.strip()[len(matched):].lstrip(":").strip()
+            if after_label:
+                fields[field_key] = after_label
+            else:
+                for next_line in lines[i + 1:]:
+                    next_line = next_line.strip()
+                    if not next_line:
+                        continue
+                    if any(next_line.lower().startswith(l) for l in all_labels):
+                        break
+                    fields[field_key] = next_line
+                    break
+            break
+
+    return fields
+
+
+def format_pdf_fields(fields: dict) -> str:
+    """Format extracted fields into a compact, clearly-labeled block."""
+    if not fields:
+        return ""
+    lines = ["[Extracted fields from PDF attachment]"]
+    if "description" in fields:
+        lines.append(f"Problem description: {fields['description']}")
+    if "location" in fields:
+        lines.append(f"Address/Location: {fields['location']}")
+    if "email" in fields:
+        lines.append(f"Contact email: {fields['email']}")
+    if "permission" in fields:
+        lines.append(f"Permission to enter home: {fields['permission']}")
+    return "\n".join(lines)
+
 
 def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
     """Embed the ticket text and find the most similar known issues in Chroma.
