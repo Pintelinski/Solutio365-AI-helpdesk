@@ -43,6 +43,11 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
+# --- TESTING OVERRIDE: remove this line before going live ---
+TEST_EMAIL_OVERRIDE = "pepijn090203@gmail.com"
+# ---------------------------------------------------------------
+EMAIL_PATTERN = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
+
 security = HTTPBasic()
 
 def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -> bool:
@@ -165,8 +170,10 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         return {
             "category": "other",
             "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
+            "target_email": None,
         }
 
+    result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
     return result
 
 
@@ -192,6 +199,22 @@ def _parse_model_json(content: str) -> dict | None:
             pass
 
     return None
+
+
+def validate_target_email(target_email: str | None, description: str, pdf_text: str) -> str | None:
+    """Only trust target_email if it's a well-formed address that actually
+    appears somewhere in the source text - guards against the model
+    inventing/guessing an address rather than reading one."""
+    if not target_email:
+        return None
+    if not EMAIL_PATTERN.fullmatch(target_email.strip()):
+        print(f"Rejected target_email (not a valid email format): {target_email!r}")
+        return None
+    combined_text = f"{description}\n{pdf_text}"
+    if target_email.strip().lower() not in combined_text.lower():
+        print(f"Rejected target_email (not found in source text): {target_email!r}")
+        return None
+    return target_email.strip()
 
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
@@ -253,19 +276,33 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
     return saved_paths
 
 
-def reply_to_ticket(ticket_id: int, message_html: str, assign: int) -> dict:
+def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None = None) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
 
     message_text = message_html.replace("\n", "<br>")
 
-    response = requests.post(
-        f"{BASE_URL}/tickets/{ticket_id}/reply",
-        auth=AUTH,
-        json={"body": message_text},
-        timeout=15,
-    )
+    # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
+    # of what target_email logic below would otherwise pick. Remove this line,
+    # keep the real logic beneath it, once you're done testing.
+    send_to = TEST_EMAIL_OVERRIDE
+    # send_to = target_email  # <- real logic, re-enable this once override is removed
+
+    if send_to:
+        response = requests.post(
+            f"{BASE_URL}/tickets/{ticket_id}/reply_to_forward",
+            auth=AUTH,
+            json={"body": message_text, "to_emails": [send_to]},
+            timeout=15,
+        )
+    else:
+        response = requests.post(
+            f"{BASE_URL}/tickets/{ticket_id}/reply",
+            auth=AUTH,
+            json={"body": message_text},
+            timeout=15,
+        )
     response.raise_for_status()
 
     responder_id = SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID
@@ -294,7 +331,7 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     reply_message = decision["reply"]
 
     try:
-        reply_to_ticket(ticket_id, reply_message, assign)
+        reply_to_ticket(ticket_id, reply_message, assign, decision.get("target_email"))
         target = "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
