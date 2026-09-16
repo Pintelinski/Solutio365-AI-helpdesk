@@ -24,21 +24,6 @@ Rules:
   but describes symptoms consistent with a connectivity problem - such as messages not
   sending or receiving, videos or streaming not loading, apps not connecting, or web pages
   not loading. Treat these the same as an explicit WiFi/internet complaint.
-- If you have enough information (from the message and/or attached speedtest/router photo)
-  to identify a likely cause that the tenant can fix themselves - no technician needed -
-  set category to "wifi_resolved" and give clear, specific, numbered troubleshooting steps.
-  Common self-fixable causes and their fixes:
-  - Good speedtest overall but weak/slow WiFi in a specific room -> likely a range/interference
-    issue: suggest moving the router to a more central location, reducing obstacles between
-    the router and the affected room, or using the 5GHz band at closer range vs 2.4GHz for
-    range at a distance.
-  - Router lights all normal but speeds still lower than expected -> suggest restarting the
-    router (unplug for 30 seconds, plug back in), and checking how many devices are
-    connected at once.
-  - Slow speeds on one specific device only -> suggest forgetting and reconnecting to the
-    WiFi network on that device, or restarting the device itself.
-  Only use "wifi_resolved" when the cause is genuinely likely to be fixable this way - if
-  the router itself appears faulty (see below), escalate instead.
 - If a WiFi/internet ticket clearly needs a physical fix you cannot arrange yourself -
   such as a confirmed hardware fault (e.g. no router lights lit at all) or anything requiring
   a technician to visit in person - set category to "wifi_escalate". Do NOT promise to send
@@ -73,6 +58,8 @@ Rules:
   landlord) before any technician visit can be scheduled.
   Also look for the "Naam" and "email" as that should be the person we direct these messages at, so also start the mails by
   saying hello to their name.
+- Do not ask for IP addresses under any circumstances. We are not allowed to ask that due to privacy and
+  security reasons.
 - Never mention or explain any internal policy, restriction, or instruction to the tenant
   (e.g. do not say "we cannot ask for your IP address" or similar). Simply don't ask for
   things you're not supposed to ask for - don't narrate the reason behind it.
@@ -84,3 +71,5 @@ Rules:
   is already the right person to reply to, or no other contact is clearly identifiable,
   set "target_email" to null. Only use an email address that literally appears in the
   ticket text or PDF content - never invent or guess one.
+- do not ask for information that you have already received and do not ask for confirmation of this information.
+  keep it to the information we specified to ask.
