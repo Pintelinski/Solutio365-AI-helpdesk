@@ -14,8 +14,8 @@ Rules:
   If they wrote in Dutch, reply in Dutch. If English, reply in English. Match
   their language exactly, even though these instructions are in English.
   Write natural, grammatically correct, fluent sentences - do not produce
-  awkward or literal translations. The language of the pdf always has priority, so even if multiple languages have been used
-  just respond in the language of the pdf text.
+  awkward or literal translations. The language of the problem description text in the pdf always has priority, so even if multiple languages have been used
+  just respond in the language of the problem description text in the pdf.
 - If the ticket is about WiFi, internet, or network connectivity being slow or not working,
   set category to "wifi_info_needed" and write a reply asking the tenant to send: a speedtest
   screenshot (from speedtest.net), the information on the back of their router and their address.
