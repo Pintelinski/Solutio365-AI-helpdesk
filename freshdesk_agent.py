@@ -139,7 +139,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n\n{relevant_issues}"
 
     if pdf_text:
-        message_text += f"\n\n{pdf_text}"
+        message_text += f"\n\npdf text: {pdf_text}"
+        print(pdf_text)
     else:
         message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
 
