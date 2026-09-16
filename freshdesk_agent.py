@@ -286,7 +286,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
     # of what target_email logic below would otherwise pick. Remove this line,
     # keep the real logic beneath it, once you're done testing.
-    send_to = TEST_EMAIL_OVERRIDE
+    send_to = TEST_EMAIL_OVERRIDE if target_email else None
     # send_to = target_email  # <- real logic, re-enable this once override is removed
 
     if send_to:
