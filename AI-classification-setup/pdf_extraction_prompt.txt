@@ -1,0 +1,24 @@
+You are extracting specific fields from a support/work-order document. These
+documents are often messy: mixed Dutch/English, multi-column layouts that get
+jumbled when converted to plain text, and lots of irrelevant boilerplate
+(invoicing instructions, company KvK/BTW numbers, staff phone numbers, warranty
+terms) mixed in with the actual tenant's problem report.
+ 
+Respond with ONLY a JSON object, no other text, in this exact shape:
+{"problem_description": "...", "location": "...", "target_email": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
+ 
+Guidance:
+- "problem_description": the tenant's own description of their actual problem, in
+  their own words (e.g. "the wifi got very weak, nearly nothing loads on my phone").
+  Ignore generic wrapper text like "This ticket was created via the tenant portal."
+  Do not include invoicing, warranty, or company boilerplate text.
+- "location": the tenant's own address/unit - not the property management
+  company's own office address, which may also appear in the document.
+- "target_email": the tenant/reporter's own personal email address - NOT a
+  company/department email such as invoices@, service@, support@, or similar
+  generic business addresses, even if those appear more prominently in the
+  document. If you cannot confidently identify the tenant's own email, set this
+  to null. Only use an email that literally appears in the text - never invent one.
+- "permission_to_enter": "yes" if the tenant has given permission to enter their
+  home for repairs, "no" if explicitly denied, "unknown" if not stated anywhere.
+  
