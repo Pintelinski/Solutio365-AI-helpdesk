@@ -19,6 +19,7 @@ Guidance:
   generic business addresses, even if those appear more prominently in the
   document. If you cannot confidently identify the tenant's own email, set this
   to null. Only use an email that literally appears in the text - never invent one.
+  If multiple emails could plausibly belong to the tenant, pick exactly one - the
+  single most likely one. Always return a single string or null, never a list/array.
 - "permission_to_enter": "yes" if the tenant has given permission to enter their
   home for repairs, "no" if explicitly denied, "unknown" if not stated anywhere.
-  

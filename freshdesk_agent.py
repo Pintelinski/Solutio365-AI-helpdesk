@@ -233,10 +233,10 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         }
 
     print(f"Model's own target_email guess: {result.get('target_email')!r}")
-    result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
+    result["target_email"] = validate_target_email(normalize_email_value(result.get("target_email")), description, pdf_text)
 
     if pdf_context.get("target_email"):
-        confirmed = validate_target_email(pdf_context["target_email"], description, pdf_text)
+        confirmed = validate_target_email(normalize_email_value(pdf_context["target_email"]), description, pdf_text)
         if confirmed:
             result["target_email"] = confirmed
             print(f"Using target_email from PDF extraction pass: {confirmed}")
@@ -280,6 +280,22 @@ def validate_target_email(target_email: str | None, description: str, pdf_text: 
         print(f"Rejected target_email (not found in source text): {target_email!r}")
         return None
     return target_email.strip()
+
+
+def normalize_email_value(value) -> str | None:
+    """The model sometimes returns a list of emails instead of a single
+    string, despite the prompt asking for one. Take the first usable one
+    rather than crashing on unexpected shapes."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
 
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
