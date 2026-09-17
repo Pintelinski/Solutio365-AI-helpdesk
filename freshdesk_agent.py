@@ -133,18 +133,19 @@ def extract_pdf_fields(text: str) -> dict:
             matched = next((l for l in labels if line_lower.startswith(l)), None)
             if not matched:
                 continue
+            collected = []
             after_label = line.strip()[len(matched):].lstrip(":").strip()
             if after_label:
-                fields[field_key] = after_label
-            else:
-                collected = []
-                for next_line in lines[i + 1:]:
-                    next_line_stripped = next_line.strip()
-                    if any(next_line_stripped.lower().startswith(l) for l in all_labels):
-                        break
-                    if next_line_stripped:
-                        collected.append(next_line_stripped)
-                fields[field_key] = " ".join(collected)
+                collected.append(after_label)
+
+            for next_line in lines[i + 1:]:
+                next_line_stripped = next_line.strip()
+                if any(next_line_stripped.lower().startswith(l) for l in all_labels):
+                    break
+                if next_line_stripped:
+                    collected.append(next_line_stripped)
+
+            fields[field_key] = " ".join(collected)
             break
 
     return fields
