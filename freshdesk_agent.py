@@ -46,7 +46,6 @@ ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
 # ---------------------------------------------------------------
-EMAIL_PATTERN = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
 
 security = HTTPBasic()
 
@@ -236,8 +235,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
             "target_email": None,
         }
 
-    result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
     print(result["target_email"])
+    result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
     return result
 
 
@@ -266,13 +265,11 @@ def _parse_model_json(content: str) -> dict | None:
 
 
 def validate_target_email(target_email: str | None, description: str, pdf_text: str) -> str | None:
-    """Only trust target_email if it's a well-formed address that actually
-    appears somewhere in the source text - guards against the model
-    inventing/guessing an address rather than reading one."""
+    """Only trust target_email if it actually appears somewhere in the source
+    text - guards against the model inventing/guessing an address rather
+    than reading one. No format validation, since real addresses have too
+    much valid variation to hand-roll a regex for reliably."""
     if not target_email:
-        return None
-    if not EMAIL_PATTERN.fullmatch(target_email.strip()):
-        print(f"Rejected target_email (not a valid email format): {target_email!r}")
         return None
     combined_text = f"{description}\n{pdf_text}"
     if target_email.strip().lower() not in combined_text.lower():
