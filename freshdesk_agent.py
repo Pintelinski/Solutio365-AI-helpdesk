@@ -315,13 +315,13 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
     print(FORBIDDEN_EMAIL_ADDRESSES, FORBIDDEN_EMAIL_DOMAINS)
     for email in candidates:
         domain = email.rsplit("@", 1)[1]
-        if any(domain.endswith(tld) for tld in ALLOWED_EMAIL_TLDS):
-            if email in FORBIDDEN_EMAIL_ADDRESSES or domain in FORBIDDEN_EMAIL_DOMAINS:
-                print(f"Forbidden target email: {email}")
-                continue
-            else:
-                allowed.append(email)
-        continue
+        if not any(domain.endswith(tld) for tld in ALLOWED_EMAIL_TLDS):
+            print(f"Ignoring email with unsupported TLD: {email}")
+            continue
+        if email in FORBIDDEN_EMAIL_ADDRESSES or domain in FORBIDDEN_EMAIL_DOMAINS:
+            print(f"Forbidden target email: {email}")
+            continue
+        allowed.append(email)
 
     target_email = allowed[0] if allowed else None
     print(f"Email candidates: {candidates}; selected target email: {target_email!r}")
