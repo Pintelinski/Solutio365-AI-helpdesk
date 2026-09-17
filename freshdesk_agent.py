@@ -52,13 +52,20 @@ ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
 FORBIDDEN_EMAIL_DOMAINS = {
     domain.strip().lower().lstrip("@")
-    for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "magisrealestate.com").split(",")
+    for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "").split(",")
     if domain.strip()
 }
 FORBIDDEN_EMAIL_ADDRESSES = {
     address.strip().lower()
     for address in os.getenv("FORBIDDEN_EMAIL_ADDRESSES", "").split(",")
     if address.strip()
+}
+ALLOWED_EMAIL_TLDS = {
+    f".{tld.strip().lower().lstrip('.')}"
+    for tld in os.getenv(
+        "ALLOWED_EMAIL_TLDS",
+    ).split(",")
+    if tld.strip()
 }
 
 # --- TESTING OVERRIDE: remove this line before going live ---
@@ -307,6 +314,9 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
     allowed = []
     for email in candidates:
         domain = email.rsplit("@", 1)[1]
+        if not any(domain.endswith(tld) for tld in ALLOWED_EMAIL_TLDS):
+            print(f"Ignoring email with unsupported TLD: {email}")
+            continue
         if email in FORBIDDEN_EMAIL_ADDRESSES or domain in FORBIDDEN_EMAIL_DOMAINS:
             print(f"Ignoring forbidden target email: {email}")
             continue
@@ -404,7 +414,8 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
     # of what target_email logic below would otherwise pick. Remove this line,
     # keep the real logic beneath it, once you're done testing.
-    send_to = TEST_EMAIL_OVERRIDE or target_email
+    send_to = TEST_EMAIL_OVERRIDE if target_email else None
+    # send_to = target_email  # <- real logic, re-enable this once override is removed
 
     if send_to:
         response = requests.post(
