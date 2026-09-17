@@ -49,7 +49,7 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
-EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
+EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
 FORBIDDEN_EMAIL_DOMAINS = {
     domain.strip().lower().lstrip("@")
     for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "").split(",")
@@ -312,19 +312,16 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
         candidates.append(email)
 
     allowed = []
-    print(FORBIDDEN_EMAIL_ADDRESSES, FORBIDDEN_EMAIL_DOMAINS)
     for email in candidates:
         domain = email.rsplit("@", 1)[1]
         if not any(domain.endswith(tld) for tld in ALLOWED_EMAIL_TLDS):
-            print(f"Ignoring email with unsupported TLD: {email}")
             continue
         if email in FORBIDDEN_EMAIL_ADDRESSES or domain in FORBIDDEN_EMAIL_DOMAINS:
-            print(f"Forbidden target email: {email}")
             continue
         allowed.append(email)
 
     target_email = allowed[0] if allowed else None
-    print(f"Email candidates: {candidates}; selected target email: {target_email!r}")
+    print(f"Eligible target emails: {allowed}; selected target email: {target_email!r}")
     return target_email
 
 
