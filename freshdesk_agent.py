@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+from langdetect import detect, DetectorFactory
 import requests
 import ngrok
 import ollama
@@ -36,6 +37,11 @@ ollama_client = ollama.Client(host=OLLAMA_HOST)
 PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "classification_system_prompt.txt"
 CLASSIFICATION_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
+PDF_EXTRACTION_PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "pdf_extraction_prompt.txt"
+PDF_EXTRACTION_PROMPT = PDF_EXTRACTION_PROMPT_PATH.read_text(encoding="utf-8")
+DetectorFactory.seed = 0
+LANGUAGE_MAP = {"nl": "Dutch", "en": "English"}
+
 EMBED_MODEL = "nomic-embed-text"
 CHROMA_PATH = Path(__file__).parent / "chroma_db"
 chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
@@ -48,6 +54,7 @@ TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing ma
 # ---------------------------------------------------------------
 
 security = HTTPBasic()
+
 
 def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -> bool:
     """Checks the Basic Auth header Freshdesk sends against our own secret.
@@ -62,6 +69,7 @@ def verify_webhook_auth(credentials: HTTPBasicCredentials = Depends(security)) -
         raise HTTPException(status_code=401, detail="Invalid webhook credentials")
     return True
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ngrok.set_auth_token(os.getenv("NGROK_AUTHTOKEN"))
@@ -73,18 +81,12 @@ async def lifespan(app: FastAPI):
     yield
     ngrok.disconnect()
 
-PDF_FIELD_LABELS = {
-    "description": ["omschrijving", "Ömschrijving melding", "beschrijving", "problem description", "description"],
-    "location": ["adres", "locatie", "address", "location(s)"],
-    "email": ["email", "e-mail", "e-mailadres"],
-    "permission": ["toestemming om woning te betreden", "toestemming", "permission to enter"],
-}
-
 
 app = FastAPI(lifespan=lifespan)
 
+
 def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
-    """Download PDF attachments and extract their text content."""
+    """Download PDF attachments and extract their raw text content."""
     ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
     extracted_texts = []
 
@@ -104,67 +106,48 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
 
             reader = PdfReader(file_path)
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            fields = extract_pdf_fields(text)
-            formatted = format_pdf_fields(fields)
-            if formatted:
-                extracted_texts.append(formatted)
-                print(f"Extracted fields from PDF {name}: {list(fields.keys())}")
-            else:
-                extracted_texts.append(f"[PDF attachment '{name}', fields not recognized]\n{text}")
-                print(f"No known fields matched in PDF {name}, using raw text as fallback")
+            extracted_texts.append(text)
+            print(f"Extracted raw text from PDF {name} ({len(text)} chars)")
         except Exception as e:
             print(f"Failed to process PDF {name}: {e}")
 
     return "\n\n".join(extracted_texts)
 
 
-def extract_pdf_fields(text: str) -> dict:
-    """Pull out only the fields we actually use from PDF form text, instead
-    of sending the whole raw PDF. Keeps input smaller/faster and removes
-    Dutch field labels from sitting next to content, which was confusing
-    the model's language detection."""
-    fields = {}
-    lines = text.split("\n")
-    all_labels = [l for labels in PDF_FIELD_LABELS.values() for l in labels]
+def extract_pdf_context(pdf_text: str) -> dict:
+    """Use the model to pull clean fields out of noisy real-world PDF text -
+    regex/line-matching proved too fragile against multi-column work orders
+    where labels and values get jumbled together in the raw extracted text."""
+    if not pdf_text.strip():
+        return {}
 
-    for field_key, labels in PDF_FIELD_LABELS.items():
-        for i, line in enumerate(lines):
-            line_lower = line.strip().lower()
-            matched = next((l for l in labels if line_lower.startswith(l)), None)
-            if not matched:
-                continue
-            collected = []
-            after_label = line.strip()[len(matched):].lstrip(":").strip()
-            if after_label:
-                collected.append(after_label)
-
-            for next_line in lines[i + 1:]:
-                next_line_stripped = next_line.strip()
-                if any(next_line_stripped.lower().startswith(l) for l in all_labels):
-                    break
-                if next_line_stripped:
-                    collected.append(next_line_stripped)
-
-            fields[field_key] = " ".join(collected)
-            break
-
-    return fields
+    response = ollama_client.chat(
+        model=OLLAMA_MODEL,
+        messages=[
+            {"role": "system", "content": PDF_EXTRACTION_PROMPT},
+            {"role": "user", "content": pdf_text},
+        ],
+        format="json",
+        think=False,
+        options={"num_ctx": 8192, "temperature": 0.2},
+    )
+    result = _parse_model_json(response.message.content) or {}
+    print(f"PDF extraction result: {result}")
+    return result
 
 
-def format_pdf_fields(fields: dict) -> str:
-    """Format extracted fields into a compact, clearly-labeled block."""
-    if not fields:
-        return ""
-    lines = ["[Extracted fields from PDF attachment]"]
-    if "description" in fields:
-        lines.append(f"Problem description: {fields['description']}")
-    if "location" in fields:
-        lines.append(f"Address/Location: {fields['location']}")
-    if "email" in fields:
-        lines.append(f"Contact email: {fields['email']}")
-    if "permission" in fields:
-        lines.append(f"Permission to enter home: {fields['permission']}")
-    return "\n".join(lines)
+def detect_reply_language(pdf_context: dict, description: str) -> str:
+    """Deterministically decide reply language from the cleanly-extracted
+    problem description (from the PDF extraction pass, or the main ticket
+    text if there's no PDF) - not left to the final generation step."""
+    text_to_check = (pdf_context.get("problem_description") or description or "").strip()
+    if not text_to_check:
+        return "English"
+    try:
+        detected = detect(text_to_check)
+    except Exception:
+        return "English"
+    return LANGUAGE_MAP.get(detected, "English")
 
 
 def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
@@ -173,17 +156,19 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
     string if nothing relevant enough is found."""
     if not description or not description.strip():
         return ""
+
     query_embedding = ollama_client.embeddings(model=EMBED_MODEL, prompt=description)["embedding"]
     results = known_issues_collection.query(query_embeddings=[query_embedding], n_results=n_results)
- 
+
     if not results["documents"] or not results["documents"][0]:
         return ""
- 
+
     blocks = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
         blocks.append(f"- Known pattern: {doc}\n  Suggested category: {meta['category']}\n  Guidance: {meta['guidance']}")
- 
+
     return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
+
 
 def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "") -> dict:
     """Ask the local model to classify the ticket and draft a reply.
@@ -192,19 +177,29 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     retrieval_query = f"{description}\n{pdf_text}".strip()
     relevant_issues = retrieve_relevant_issues(retrieval_query)
 
+    pdf_context = extract_pdf_context(pdf_text) if pdf_text.strip() else {}
+    reply_language = detect_reply_language(pdf_context, description)
+
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
     else:
         message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
 
+    if pdf_context.get("problem_description"):
+        message_text += f"\n\n[Extracted from PDF - Problem description: {pdf_context['problem_description']}]"
+    if pdf_context.get("location"):
+        message_text += f"\n[Extracted from PDF - Address/Location: {pdf_context['location']}]"
+    if pdf_context.get("permission_to_enter"):
+        message_text += f"\n[Extracted from PDF - Permission to enter home: {pdf_context['permission_to_enter']}]"
+    if pdf_text.strip() and not pdf_context:
+        message_text += "\n\n[A PDF was attached but no fields could be confidently extracted from it.]"
+    if not pdf_text.strip():
+        message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
+
+    message_text += f"\n\n[REQUIRED REPLY LANGUAGE: {reply_language}. This has already been determined for you - write your entire reply in {reply_language}, regardless of any other language appearing elsewhere in this message.]"
+
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
-
-    if pdf_text:
-        message_text += f"\n\npdf text: {pdf_text}"
-        print(pdf_text)
-    else:
-        message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
 
     user_message = {"role": "user", "content": message_text}
     if image_paths:
@@ -226,6 +221,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         print(f"Model reasoning (not sent to tenant): {thinking}")
 
     content = response.message.content
+    print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
     if result is None or result.get("category") not in ("wifi_info_needed", "wifi_resolved", "wifi_escalate", "other") or "reply" not in result:
@@ -236,8 +232,15 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
             "target_email": None,
         }
 
-    print(result["target_email"])
+    print(f"Model's own target_email guess: {result.get('target_email')!r}")
     result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
+
+    if pdf_context.get("target_email"):
+        confirmed = validate_target_email(pdf_context["target_email"], description, pdf_text)
+        if confirmed:
+            result["target_email"] = confirmed
+            print(f"Using target_email from PDF extraction pass: {confirmed}")
+
     return result
 
 
@@ -321,6 +324,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             file_path = ticket_dir / name
             file_path.write_bytes(img_response.content)
             saved_paths.append(file_path)
+            print(f"Saved image attachment: {file_path}")
         except requests.exceptions.RequestException as e:
             print(f"Failed to download attachment {name}: {e}")
 
@@ -332,6 +336,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             file_path = ticket_dir / f"inline_{i}.png"
             file_path.write_bytes(img_response.content)
             saved_paths.append(file_path)
+            print(f"Saved inline image: {file_path}")
         except requests.exceptions.RequestException as e:
             print(f"Failed to download inline image from {url}: {e}")
 
