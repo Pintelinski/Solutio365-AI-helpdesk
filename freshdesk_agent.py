@@ -237,6 +237,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         }
 
     result["target_email"] = validate_target_email(result.get("target_email"), description, pdf_text)
+    print(result["target_email"])
     return result
 
 
