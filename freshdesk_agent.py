@@ -49,6 +49,18 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
+EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
+FORBIDDEN_EMAIL_DOMAINS = {
+    domain.strip().lower().lstrip("@")
+    for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "magisrealestate.com").split(",")
+    if domain.strip()
+}
+FORBIDDEN_EMAIL_ADDRESSES = {
+    address.strip().lower()
+    for address in os.getenv("FORBIDDEN_EMAIL_ADDRESSES", "").split(",")
+    if address.strip()
+}
+
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
 # ---------------------------------------------------------------
@@ -232,14 +244,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
             "target_email": None,
         }
 
-    print(f"Model's own target_email guess: {result.get('target_email')!r}")
-    result["target_email"] = validate_target_email(normalize_email_value(result.get("target_email")), description, pdf_text)
-
-    if pdf_context.get("target_email"):
-        confirmed = validate_target_email(normalize_email_value(pdf_context["target_email"]), description, pdf_text)
-        if confirmed:
-            result["target_email"] = confirmed
-            print(f"Using target_email from PDF extraction pass: {confirmed}")
+    result["target_email"] = select_target_email(description, pdf_text)
 
     return result
 
@@ -280,6 +285,36 @@ def validate_target_email(target_email: str | None, description: str, pdf_text: 
         print(f"Rejected target_email (not found in source text): {target_email!r}")
         return None
     return target_email.strip()
+
+
+def select_target_email(description: str, pdf_text: str) -> str | None:
+    """Choose the first source email that is not on the forbidden lists.
+
+    The source text is authoritative; the language model is not asked to
+    guess which address should receive the reply.
+    """
+    combined_text = f"{description}\n{pdf_text}"
+    candidates = []
+    seen = set()
+
+    for match in EMAIL_PATTERN.findall(combined_text):
+        email = match.strip(".,;:()[]<>").lower()
+        if email in seen:
+            continue
+        seen.add(email)
+        candidates.append(email)
+
+    allowed = []
+    for email in candidates:
+        domain = email.rsplit("@", 1)[1]
+        if email in FORBIDDEN_EMAIL_ADDRESSES or domain in FORBIDDEN_EMAIL_DOMAINS:
+            print(f"Ignoring forbidden target email: {email}")
+            continue
+        allowed.append(email)
+
+    target_email = allowed[0] if allowed else None
+    print(f"Email candidates: {candidates}; selected target email: {target_email!r}")
+    return target_email
 
 
 def normalize_email_value(value) -> str | None:
@@ -369,8 +404,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
     # of what target_email logic below would otherwise pick. Remove this line,
     # keep the real logic beneath it, once you're done testing.
-    send_to = TEST_EMAIL_OVERRIDE if target_email else None
-    # send_to = target_email  # <- real logic, re-enable this once override is removed
+    send_to = TEST_EMAIL_OVERRIDE or target_email
 
     if send_to:
         response = requests.post(
