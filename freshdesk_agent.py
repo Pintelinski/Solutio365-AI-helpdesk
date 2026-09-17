@@ -137,14 +137,14 @@ def extract_pdf_fields(text: str) -> dict:
             if after_label:
                 fields[field_key] = after_label
             else:
+                collected = []
                 for next_line in lines[i + 1:]:
-                    next_line = next_line.strip()
-                    if not next_line:
-                        continue
-                    if any(next_line.lower().startswith(l) for l in all_labels):
+                    next_line_stripped = next_line.strip()
+                    if any(next_line_stripped.lower().startswith(l) for l in all_labels):
                         break
-                    fields[field_key] = next_line
-                    break
+                    if next_line_stripped:
+                        collected.append(next_line_stripped)
+                fields[field_key] = " ".join(collected)
             break
 
     return fields
