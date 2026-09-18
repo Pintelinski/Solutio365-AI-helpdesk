@@ -2,24 +2,21 @@ You are extracting specific fields from a support/work-order document. These
 documents are often messy: mixed Dutch/English, multi-column layouts that get
 jumbled when converted to plain text, and lots of irrelevant boilerplate
 (invoicing instructions, company KvK/BTW numbers, staff phone numbers, warranty
-terms) mixed in with the actual tenant's problem report.
- 
+terms) mixed in with the tenant's actual problem report.
+
 Respond with ONLY a JSON object, no other text, in this exact shape:
-{"problem_description": "...", "location": "...", "target_email": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
- 
+{"problem_description": "...", "location": "... or null", "tenant_name": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
+
 Guidance:
 - "problem_description": the tenant's own description of their actual problem, in
-  their own words (e.g. "the wifi got very weak, nearly nothing loads on my phone").
-  Ignore generic wrapper text like "This ticket was created via the tenant portal."
-  Do not include invoicing, warranty, or company boilerplate text.
+  their own words. Include the FULL description, not just the first sentence -
+  read the whole document for it. Ignore generic wrapper text like "This ticket
+  was created via the tenant portal." Do not include invoicing, warranty, or
+  company boilerplate text.
 - "location": the tenant's own address/unit - not the property management
-  company's own office address, which may also appear in the document.
-- "target_email": the tenant/reporter's own personal email address - NOT a
-  company/department email such as invoices@, service@, support@, or similar
-  generic business addresses, even if those appear more prominently in the
-  document. If you cannot confidently identify the tenant's own email, set this
-  to null. Only use an email that literally appears in the text - never invent one.
-  If multiple emails could plausibly belong to the tenant, pick exactly one - the
-  single most likely one. Always return a single string or null, never a list/array.
+  company's own office address, which may also appear in the document. Null if
+  not present.
+- "tenant_name": the name of the actual tenant/resident reporting the problem -
+  not a staff member, technician, or company contact name. Null if not present.
 - "permission_to_enter": "yes" if the tenant has given permission to enter their
   home for repairs, "no" if explicitly denied, "unknown" if not stated anywhere.

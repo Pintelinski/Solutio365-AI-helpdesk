@@ -184,12 +184,12 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
 
     blocks = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        blocks.append(f"- Known pattern: {doc}\n  Suggested category: {meta['category']}\n  Guidance: {meta['guidance']}")
+        blocks.append(f"- Known pattern: {doc}\n  Category: {meta['category']}")
 
     return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
 
 
-def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "") -> dict:
+def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "", requester_name: str | None = None) -> dict:
     """Ask the local model to classify the ticket and draft a reply.
     If image_paths is given, the images are attached to the user message so
     the model can look at them directly (e.g. a photo of a router)."""
@@ -198,6 +198,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     pdf_context = extract_pdf_context(pdf_text) if pdf_text.strip() else {}
     reply_language = detect_reply_language(pdf_context, description)
+    tenant_name = pdf_context.get("tenant_name") or requester_name
 
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
@@ -214,6 +215,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += "\n\n[A PDF was attached but no fields could be confidently extracted from it.]"
     if not pdf_text.strip():
         message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
+    if tenant_name:
+        message_text += f"\n\n[Tenant name: {tenant_name}]"
 
     message_text += f"\n\n[REQUIRED REPLY LANGUAGE: {reply_language}. This has already been determined for you - write your entire reply in {reply_language}, regardless of any other language appearing elsewhere in this message.]"
 
@@ -243,16 +246,13 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
-    if result is None or result.get("category") not in ("wifi_info_needed", "wifi_resolved", "wifi_escalate", "other") or "reply" not in result:
+    if result is None or result.get("category") not in ("wifi", "other") or "reply" not in result:
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
-        return {
-            "category": "other",
-            "reply": "Hi, thanks for reaching out. Our team will contact you soon.",
-            "target_email": None,
-        }
-
-    result["target_email"] = select_target_email(description, pdf_text)
-
+        return {"category": "other", "missing_info": [], "reply": "Hi, thanks for reaching out. Our team will contact you soon."}
+ 
+    if not isinstance(result.get("missing_info"), list):
+        result["missing_info"] = []
+ 
     return result
 
 
@@ -443,7 +443,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     return {"reply": response.json(), "assign": assign_response.json()}
 
 
-def process_ticket(ticket_id: int, requester_email: str, description: str) -> None:
+def process_ticket(ticket_id: int, requester_email: str, requester_name: str, description: str) -> None:
     """Runs the slow AI classification + Freshdesk reply after the webhook
     has already been acknowledged, so Freshdesk/the sender never times out
     waiting on the model."""
@@ -452,12 +452,14 @@ def process_ticket(ticket_id: int, requester_email: str, description: str) -> No
     print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
     pdf_text = download_and_extract_pdfs(ticket_id, attachments)
-    decision = classify_and_draft_reply(description, image_paths, pdf_text)
-    assign = 1 if decision["category"] in ("wifi_info_needed", "wifi_resolved") else 2
+    decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
+    missing_info = decision.get("missing_info", [])
+    assign = 2 if (decision["category"] == "other" or not missing_info) else 1
     reply_message = decision["reply"]
+    target_email = select_target_email(description, pdf_text)
 
     try:
-        reply_to_ticket(ticket_id, reply_message, assign, decision.get("target_email"))
+        reply_to_ticket(ticket_id, reply_message, assign, target_email)
         target = "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
@@ -471,8 +473,9 @@ async def receive_ticket(request: Request, background_tasks: BackgroundTasks, au
 
     ticket_id = payload.get("ticket_id")
     requester_email = payload.get("requester_email")
+    requester_name = payload.get("requester_name")
     description = payload.get("description_text")
 
-    background_tasks.add_task(process_ticket, int(ticket_id), requester_email, description)
+    background_tasks.add_task(process_ticket, int(ticket_id), requester_email, requester_name, description)
 
     return {"status": "accepted", "ticket_id": int(ticket_id)}
