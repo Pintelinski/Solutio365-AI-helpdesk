@@ -235,7 +235,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         ],
         format="json",
         think=False,
-        options={"num_ctx": 16384, "temperature": 0.4, "num_thread": 6},
+        options={"num_ctx": 16384, "temperature": 0, "num_thread": 6},
     )
 
     thinking = getattr(response.message, "thinking", None)
