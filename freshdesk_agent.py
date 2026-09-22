@@ -50,6 +50,7 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
+NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*{email}\s*>"
 FORBIDDEN_EMAIL_DOMAINS = {
     domain.strip().lower().lstrip("@")
     for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "").split(",")
@@ -133,25 +134,25 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
     return "\n\n".join(extracted_texts)
 
 
-def extract_pdf_context(pdf_text: str) -> dict:
-    """Use the model to pull clean fields out of noisy real-world PDF text -
-    regex/line-matching proved too fragile against multi-column work orders
-    where labels and values get jumbled together in the raw extracted text."""
-    if not pdf_text.strip():
+def extract_ticket_context(text: str) -> dict:
+    """Use the model to pull clean fields out of noisy source text - a PDF
+    work order OR a forwarded email chain (mixed languages, signatures,
+    wrapper text, disclaimers). Same extraction logic works for both."""
+    if not text.strip():
         return {}
 
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": PDF_EXTRACTION_PROMPT},
-            {"role": "user", "content": pdf_text},
+            {"role": "user", "content": text},
         ],
         format="json",
         think=False,
         options={"num_ctx": 8192, "temperature": 0.2},
     )
     result = _parse_model_json(response.message.content) or {}
-    print(f"PDF extraction result: {result}")
+    print(f"Ticket context extraction result: {result}")
     return result
 
 
@@ -196,25 +197,28 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     retrieval_query = f"{description}\n{pdf_text}".strip()
     relevant_issues = retrieve_relevant_issues(retrieval_query)
 
-    pdf_context = extract_pdf_context(pdf_text) if pdf_text.strip() else {}
-    reply_language = detect_reply_language(pdf_context, description)
-    tenant_name = pdf_context.get("tenant_name") or requester_name
+    # Extract from the PDF if there is one, otherwise from the raw ticket
+    # text itself - handles forwarded email chains the same way as PDFs.
+    source_text = pdf_text if pdf_text.strip() else description
+    context = extract_ticket_context(source_text)
+    reply_language = detect_reply_language(context, description)
+
+    combined_text = f"{description}\n{pdf_text}"
+    target_email = select_target_email(description, pdf_text)
+    tenant_name = find_name_near_email(combined_text, target_email) or context.get("tenant_name") or requester_name
+
 
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
     else:
         message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
 
-    if pdf_context.get("problem_description"):
-        message_text += f"\n\n[Extracted from PDF - Problem description: {pdf_context['problem_description']}]"
-    if pdf_context.get("location"):
-        message_text += f"\n[Extracted from PDF - Address/Location: {pdf_context['location']}]"
-    if pdf_context.get("permission_to_enter"):
-        message_text += f"\n[Extracted from PDF - Permission to enter home: {pdf_context['permission_to_enter']}]"
-    if pdf_text.strip() and not pdf_context:
-        message_text += "\n\n[A PDF was attached but no fields could be confidently extracted from it.]"
-    if not pdf_text.strip():
-        message_text += "\n\n[No PDF attachment was included with this message. Do not reference form fields like 'omschrijving' or 'Toestemming om woning te betreden' unless a PDF was actually provided.]"
+    if context.get("problem_description"):
+        message_text += f"\n\n[Extracted problem description (use this, not the raw text above, as the tenant's actual issue): {context['problem_description']}]"
+    if context.get("location"):
+        message_text += f"\n[Extracted address/location: {context['location']}]"
+    if context.get("permission_to_enter") and pdf_text.strip():
+        message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
 
@@ -252,7 +256,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
  
     if not isinstance(result.get("missing_info"), list):
         result["missing_info"] = []
- 
+
+    result["_target_email"] = target_email
     return result
 
 
@@ -324,6 +329,17 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
     print(f"Eligible target emails: {allowed}; selected target email: {target_email!r}")
     return target_email
 
+
+def find_name_near_email(text: str, email: str | None) -> str | None:
+    """Forwarded emails almost always include a 'Name <email>' header line
+    (e.g. 'Van: Yordan Rusev <rusev3005@gmail.com>'). This is a highly
+    reliable, deterministic signal when present - check it before falling
+    back to the model's own extraction."""
+    if not email:
+        return None
+    pattern = re.compile(NAME_BEFORE_EMAIL_PATTERN_TEMPLATE.format(email=re.escape(email)), re.IGNORECASE)
+    match = pattern.search(text)
+    return match.group(1).strip() if match else None
 
 def normalize_email_value(value) -> str | None:
     """The model sometimes returns a list of emails instead of a single
@@ -456,7 +472,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     missing_info = decision.get("missing_info", [])
     assign = 2 if (decision["category"] == "other" or not missing_info) else 1
     reply_message = decision["reply"]
-    target_email = select_target_email(description, pdf_text)
+    target_email = decision.get("_target_email")
 
     try:
         reply_to_ticket(ticket_id, reply_message, assign, target_email)
