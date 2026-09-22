@@ -49,6 +49,8 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
+VALID_CATEGORIES = ("wifi", "intercom", "other")
+
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
 NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*__EMAIL__\s*>"
 FORBIDDEN_EMAIL_DOMAINS = {
@@ -221,6 +223,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
+    if context.get("phone_number"):
+        message_text += f"\n[Extracted phone number: {context['phone_number']}]"
 
     message_text += f"\n\n[REQUIRED REPLY LANGUAGE: {reply_language}. This has already been determined for you - write your entire reply in {reply_language}, regardless of any other language appearing elsewhere in this message.]"
 
@@ -250,7 +254,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
-    if result is None or result.get("category") not in ("wifi", "other") or "reply" not in result:
+    if (
+    result is None or result.get("category") not in VALID_CATEGORIES or "reply" not in result):
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
         return {"category": "other", "missing_info": [], "reply": "Hi, thanks for reaching out. Our team will contact you soon."}
  
@@ -470,7 +475,14 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     pdf_text = download_and_extract_pdfs(ticket_id, attachments)
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
     missing_info = decision.get("missing_info", [])
-    assign = 2 if (decision["category"] == "other" or not missing_info) else 1
+    if decision["category"] == "wifi":
+        assign = 1 if missing_info else 2
+
+    elif decision["category"] == "intercom":
+        assign = 2
+
+    else:
+        assign = 2
     reply_message = decision["reply"]
     target_email = decision.get("_target_email")
 

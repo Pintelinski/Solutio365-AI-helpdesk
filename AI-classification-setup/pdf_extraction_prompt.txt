@@ -5,7 +5,7 @@ jumbled when converted to plain text, and lots of irrelevant boilerplate
 terms) mixed in with the tenant's actual problem report.
 
 Respond with ONLY a JSON object, no other text, in this exact shape:
-{"problem_description": "...", "location": "... or null", "tenant_name": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
+{"problem_description": "...", "location": "... or null", "tenant_name": "... or null", "phone_number": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
 
 Guidance:
 - "problem_description": the tenant's own description of their actual problem, in
@@ -18,5 +18,6 @@ Guidance:
   not present.
 - "tenant_name": the name of the actual tenant/resident reporting the problem -
   not a staff member, technician, or company contact name. Null if not present.
+- "phone_number": the tenant's own phone number if present anywhere in the document.
 - "permission_to_enter": "yes" if the tenant has given permission to enter their
   home for repairs, "no" if explicitly denied, "unknown" if not stated anywhere.
