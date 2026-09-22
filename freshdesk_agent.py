@@ -50,7 +50,7 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
-NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*{email}\s*>"
+NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*__EMAIL__\s*>"
 FORBIDDEN_EMAIL_DOMAINS = {
     domain.strip().lower().lstrip("@")
     for domain in os.getenv("FORBIDDEN_EMAIL_DOMAINS", "").split(",")
@@ -337,7 +337,7 @@ def find_name_near_email(text: str, email: str | None) -> str | None:
     back to the model's own extraction."""
     if not email:
         return None
-    pattern = re.compile(NAME_BEFORE_EMAIL_PATTERN_TEMPLATE.format(email=re.escape(email)), re.IGNORECASE)
+    pattern = re.compile(NAME_BEFORE_EMAIL_PATTERN_TEMPLATE.replace("__EMAIL__", re.escape(email)), re.IGNORECASE)
     match = pattern.search(text)
     return match.group(1).strip() if match else None
 
