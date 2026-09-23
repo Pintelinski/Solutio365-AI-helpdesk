@@ -223,6 +223,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
+    if context.get("tenant_full_name"):
+        message_text += f"\n[Extracted tenant full name (for intercom tickets): {context['tenant_full_name']}]"
     if context.get("phone_number"):
         message_text += f"\n[Extracted phone number: {context['phone_number']}]"
 
