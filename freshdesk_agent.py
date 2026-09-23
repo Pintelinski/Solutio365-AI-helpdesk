@@ -151,7 +151,7 @@ def extract_ticket_context(text: str) -> dict:
         ],
         format="json",
         think=False,
-        options={"num_ctx": 8192, "temperature": 0.2},
+        options={"num_ctx": 16384, "temperature": 0.2},
     )
     result = _parse_model_json(response.message.content) or {}
     print(f"Ticket context extraction result: {result}")
