@@ -18,9 +18,10 @@ Guidance:
   not present.
 - "tenant_name": the name of the actual tenant/resident reporting the problem -
   not a staff member, technician, or company contact name. Null if not present. This can be used to address the person in the reply.
-- "tenant_full_name": This is the full firstname and surname of the tenant. This must be
-  consisting of a minimum of 2 words and is otherwise missing info. This
-  is only needed to help them if they have an issue with their intercom. Otherwise this is not needed information.
+- "tenant_full_name": The tenant's first name AND surname together. Only fill this
+  in if BOTH are genuinely present somewhere in the text. If only a first name is
+  visible anywhere (like an email sign-off with just "Pepijn"), set this to null -
+  do NOT fill it with just the first name. Only needed for intercom-related issues.
 - "phone_number": the tenant's own phone number if present anywhere in the document.
 - "permission_to_enter": "yes" if the tenant has given permission to enter their
   home for repairs, "no" if explicitly denied, "unknown" if not stated anywhere.

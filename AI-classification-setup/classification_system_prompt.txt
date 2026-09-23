@@ -24,6 +24,7 @@ For WiFi/internet tickets, exactly these four things matter:
    permission field - ignore this item entirely for a normal ticket with no PDF.
 
 For Intercom tickets, exactly these three things matter:
+(Check all three every time, in order - do not skip checking any of them.)
 1. "address": the tenant's address. This is usually already stated somewhere in the
    message or PDF extraction. If you find it, do NOT list "address" as missing -
    instead, note it in your reply and simply ask the tenant to confirm it's correct.

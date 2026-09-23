@@ -209,6 +209,10 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     target_email = select_target_email(description, pdf_text)
     tenant_name = find_name_near_email(combined_text, target_email) or context.get("tenant_name") or requester_name
 
+    full_name = context.get("tenant_full_name")
+    if full_name and len(full_name.strip().split()) < 2:
+        print(f"Rejecting tenant_full_name (not actually a full name): {full_name!r}")
+        full_name = None
 
     if image_paths:
         message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
@@ -223,8 +227,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
-    if context.get("tenant_full_name"):
-        message_text += f"\n[Extracted tenant full name (for intercom tickets): {context['tenant_full_name']}]"
+    if full_name:
+        message_text += f"\n[Extracted tenant full name (for intercom tickets): {full_name}]"
     if context.get("phone_number"):
         message_text += f"\n[Extracted phone number: {context['phone_number']}]"
 
@@ -245,7 +249,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         ],
         format="json",
         think=False,
-        options={"num_ctx": 16384, "temperature": 0, "num_thread": 6},
+        options={"num_ctx": 16384, "temperature": 0.1, "num_thread": 6},
     )
 
     thinking = getattr(response.message, "thinking", None)
