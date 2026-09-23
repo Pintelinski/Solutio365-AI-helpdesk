@@ -27,8 +27,8 @@ For Intercom tickets, exactly these three things matter:
 1. "address": the tenant's address. This is usually already stated somewhere in the
    message or PDF extraction. If you find it, do NOT list "address" as missing -
    instead, note it in your reply and simply ask the tenant to confirm it's correct.
-2. "tenant_name": We need to know the tenant's name to know who we need to help with
-   their intercom as multiple people can use the same intercom.
+2. "tenant_full_name": We need to know the tenant's full name to know who we need to help with
+   their intercom as multiple people can use the same intercom. This needs to be their firstname and surname
 3. "phone_number": We need to know the phone number as that is tied to the intercom
    where the problem is stated with.
 
