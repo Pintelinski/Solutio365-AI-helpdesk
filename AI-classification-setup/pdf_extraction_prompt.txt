@@ -5,7 +5,7 @@ jumbled when converted to plain text, and lots of irrelevant boilerplate
 terms) mixed in with the tenant's actual problem report.
 
 Respond with ONLY a JSON object, no other text, in this exact shape:
-{"problem_description": "...", "location": "... or null", "tenant_name": "... or null", "phone_number": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
+{"problem_description": "...", "location": "... or null", "tenant_name": "... or null", "tenant_full_name": "... or null", "phone_number": "... or null", "permission_to_enter": "yes", "no", or "unknown"}
 
 Guidance:
 - "problem_description": the tenant's own description of their actual problem, in
