@@ -51,6 +51,8 @@ ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 VALID_CATEGORIES = ("wifi", "intercom", "other")
 
+URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
 NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*__EMAIL__\s*>"
 FORBIDDEN_EMAIL_DOMAINS = {
@@ -135,6 +137,65 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
 
     return "\n\n".join(extracted_texts)
 
+
+def find_download_links(text: str) -> list[str]:
+    """Find http(s) URLs in ticket text - some companies send tickets as a
+    download link to an external document instead of a real attachment."""
+    if not text:
+        return []
+    return URL_PATTERN.findall(text)
+
+
+def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | None]:
+    """Try to download a URL found in ticket text and treat it as a PDF or
+    image based on its actual Content-Type (not the URL's appearance, since
+    that can't be trusted). Returns (pdf_text, image_path) - either may be
+    empty/None. Applies basic safety limits since this URL comes from
+    untrusted ticket content: http(s) only, size-capped, short timeout."""
+    if not url.lower().startswith(("http://", "https://")):
+        return "", None
+
+    try:
+        response = requests.get(url, timeout=15, stream=True, allow_redirects=True)
+        response.raise_for_status()
+
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_DOWNLOAD_BYTES:
+            print(f"Skipping linked document (too large): {url}")
+            return "", None
+
+        content = b""
+        for chunk in response.iter_content(chunk_size=65536):
+            content += chunk
+            if len(content) > MAX_DOWNLOAD_BYTES:
+                print(f"Aborting download (exceeded size limit): {url}")
+                return "", None
+
+        content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+
+        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
+            ticket_dir.mkdir(parents=True, exist_ok=True)
+            file_path = ticket_dir / "linked_document.pdf"
+            file_path.write_bytes(content)
+            reader = PdfReader(file_path)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            print(f"Downloaded and extracted linked PDF from {url} ({len(text)} chars)")
+            return text, None
+
+        if content_type.startswith("image/"):
+            ticket_dir.mkdir(parents=True, exist_ok=True)
+            ext = content_type.split("/")[-1]
+            file_path = ticket_dir / f"linked_image.{ext}"
+            file_path.write_bytes(content)
+            print(f"Downloaded linked image from {url}")
+            return "", file_path
+
+        print(f"Skipping linked document (unsupported content type '{content_type}'): {url}")
+        return "", None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to download linked document from {url}: {e}")
+        return "", None
 
 def extract_ticket_context(text: str) -> dict:
     """Use the model to pull clean fields out of noisy source text - a PDF
@@ -479,6 +540,16 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
     pdf_text = download_and_extract_pdfs(ticket_id, attachments)
+
+    if not pdf_text.strip():
+        ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
+        for url in find_download_links(description):
+            linked_text, linked_image_path = download_linked_document(url, ticket_dir)
+            if linked_text:
+                pdf_text += f"\n\n{linked_text}"
+            if linked_image_path:
+                image_paths.append(linked_image_path)
+
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
     missing_info = decision.get("missing_info", [])
     if decision["category"] == "wifi":
