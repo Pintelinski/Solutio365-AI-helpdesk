@@ -15,7 +15,7 @@ For WiFi/internet tickets, exactly these four things matter:
 2. "router_photo": a photo of the back of the router. If an image was provided,
    acknowledge that you've received it - do not list hardware specs, MAC addresses,
    or explain what anything means. Just acknowledge receipt.
-3. "speedtest": a speedtest result. If a speedtest image was provided, just
+3. "speedtest": a speedtest result from www.speedtest.net. If a speedtest image was provided, just
    acknowledge receipt - never recite specific numbers from it. If it's missing,
    ask for it and also ask the tenant to note where the test was taken (near the
    router, or in the room with the problem).
