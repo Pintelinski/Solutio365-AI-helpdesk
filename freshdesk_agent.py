@@ -173,7 +173,10 @@ def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | No
 
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
 
-        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
+        is_pdf = content.startswith(b"%PDF-") or content_type == "application/pdf" or url.lower().endswith(".pdf")
+        is_image = content_type.startswith("image/") or content[:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1")
+
+        if is_pdf:
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / "linked_document.pdf"
             file_path.write_bytes(content)
@@ -182,9 +185,9 @@ def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | No
             print(f"Downloaded and extracted linked PDF from {url} ({len(text)} chars)")
             return text, None
 
-        if content_type.startswith("image/"):
+        if is_image:
             ticket_dir.mkdir(parents=True, exist_ok=True)
-            ext = content_type.split("/")[-1]
+            ext = content_type.split("/")[-1] if content_type.startswith("image/") else "jpg"
             file_path = ticket_dir / f"linked_image.{ext}"
             file_path.write_bytes(content)
             print(f"Downloaded linked image from {url}")
