@@ -23,6 +23,7 @@ BASE_URL = (f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2")
 FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD", "X")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
 SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
+SUPPORT_AGENT_INTERCOM_ID = int(os.getenv("SUPPORT_AGENT_INTERCOM_ID"))
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
@@ -72,6 +73,8 @@ ALLOWED_EMAIL_TLDS = {
     ).split(",")
     if tld.strip()
 }
+
+NON_CONFIGURABLE_ADDRESSES_PATH = Path(__file__).parent / "AI-classification-setup" / "non_configurable_intercom_addresses.json"
 
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
@@ -333,6 +336,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         result["missing_info"] = []
 
     result["_target_email"] = target_email
+    result["_extracted_address"] = context.get("location")
     return result
 
 
@@ -404,6 +408,35 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
     print(f"Eligible target emails: {allowed}; selected target email: {target_email!r}")
     return target_email
 
+
+def normalize_address(address: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace - so formatting
+    differences between how a tenant writes their address and how it's
+    stored in the reference list don't cause false negatives."""
+    normalized = address.lower()
+    normalized = re.sub(r"[^\w\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def is_non_configurable_intercom(address: str | None) -> bool:
+    """Check the tenant's address against the known list of addresses whose
+    intercom cannot be configured remotely. Exact-list lookup, not semantic
+    matching - this needs to be reliable, not "close enough"."""
+    if not address:
+        return False
+
+    try:
+        known_addresses = json.loads(NON_CONFIGURABLE_ADDRESSES_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+
+    normalized_ticket_address = normalize_address(address)
+    for known in known_addresses:
+        normalized_known = normalize_address(known)
+        if normalized_known in normalized_ticket_address or normalized_ticket_address in normalized_known:
+            return True
+    return False
 
 def find_name_near_email(text: str, email: str | None) -> str | None:
     """Forwarded emails almost always include a 'Name <email>' header line
@@ -493,7 +526,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
     return saved_paths
 
 
-def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None = None) -> dict:
+def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
@@ -522,7 +555,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
         )
     response.raise_for_status()
 
-    responder_id = SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID
+    responder_id = special_agent if special_agent else (SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID)
     assign_response = requests.put(
         f"{BASE_URL}/tickets/{ticket_id}",
         auth=AUTH,
@@ -566,8 +599,15 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     reply_message = decision["reply"]
     target_email = decision.get("_target_email")
 
+    special_agent = None
+    if decision["category"] == "intercom" and assign == 2:
+        address = decision.get("_extracted_address")
+        if is_non_configurable_intercom(address):
+            special_agent = SUPPORT_AGENT_INTERCOM_ID
+            print(f"Ticket {ticket_id}: address matches non-configurable intercom list, routing to special agent")
+
     try:
-        reply_to_ticket(ticket_id, reply_message, assign, target_email)
+        reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent)
         target = "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
