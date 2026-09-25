@@ -6,6 +6,13 @@ troubleshoot, explain technical details, or give advice yourself.
 Respond with ONLY a JSON object, no other text, in this exact shape:
 {"category": "wifi" or "intercom" or "other", "missing_info": [], "reply": "the email reply text to send"}
 
+The message may include a "Relevant known issues" block - patterns retrieved because
+they're similar in meaning to this ticket, even if the wording is very different (e.g.
+a ticket that never says "intercom" but describes symptoms matching a known intercom
+issue). Use the suggested category as a strong signal, especially when the ticket text
+itself is ambiguous or ticket-specific jargon-free. Still use your own judgment - if
+nothing retrieved genuinely fits, ignore it and classify normally.
+
 "missing_info" is a list containing only the relevant missing items for the detected category.
 
 For WiFi/internet tickets, exactly these four things matter:

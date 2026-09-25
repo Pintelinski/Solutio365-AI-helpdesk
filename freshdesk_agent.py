@@ -254,7 +254,7 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
 
     blocks = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        blocks.append(f"- Known pattern: {doc}\n  Category: {meta['category']}")
+        blocks.append(f"- Known pattern: {doc}\n  Category: {meta['category']}\n  Guidance: {meta['guidance']}")
 
     return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
 
