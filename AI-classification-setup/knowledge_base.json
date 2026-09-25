@@ -34,5 +34,11 @@
     "category": "other",
     "description": "Ticket is not related to WiFi or internet connectivity at all (e.g. intercom, general maintenance, billing questions).",
     "guidance": "Do not attempt to solve this. Let the tenant know a human team member will follow up soon."
+  },
+  {
+    "id": "Phone_number_not_working",
+    "category": "intercom",
+    "description": "Ticket is saying phone number is not working, even though it was added.",
+    "guidance": "Ask for the missing information described in the classification_system_prompt.txt file, and let the tenant know a human team member will follow up soon."
   }
 ]
