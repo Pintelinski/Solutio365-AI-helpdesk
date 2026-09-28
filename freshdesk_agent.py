@@ -608,7 +608,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     try:
         reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent)
-        target = "AI agent" if assign == 1 else "human employee"
+        target = "intercom agent" if special_agent else "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
