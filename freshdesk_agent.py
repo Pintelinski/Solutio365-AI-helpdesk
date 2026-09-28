@@ -830,6 +830,8 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         except requests.exceptions.RequestException as e:
             print(f"Failed to add private note to ticket {ticket_id}: {e}")
 
+    cleanup_ticket_files(ticket_id)
+
 
 @app.post("/freshdesk-webhook", status_code=202)
 async def receive_ticket(request: Request, background_tasks: BackgroundTasks, authorized: bool = Depends(verify_webhook_auth)):
