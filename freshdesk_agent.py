@@ -273,7 +273,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     reply_language = detect_reply_language(context, description)
 
     combined_text = f"{description}\n{pdf_text}"
-    target_email = select_target_email(description, pdf_text)
+    target_email, CC_emails = select_target_email(description, pdf_text)
     tenant_name = find_name_near_email(combined_text, target_email) or context.get("tenant_name") or requester_name
 
     full_name = context.get("tenant_full_name")
@@ -337,6 +337,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     result["_target_email"] = target_email
     result["_extracted_address"] = context.get("location")
+    result["_CC_emails"] = CC_emails
     return result
 
 
@@ -406,7 +407,8 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
 
     target_email = allowed[0] if allowed else None
     print(f"Eligible target emails: {allowed}; selected target email: {target_email!r}")
-    return target_email
+    CC_emails = [email for email in allowed[1:]] if len(allowed) > 1 else []
+    return target_email, CC_emails
 
 
 def normalize_address(address: str) -> str:
@@ -526,7 +528,8 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
     return saved_paths
 
 
-def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None) -> dict:
+
+def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None, CC_emails: list[str] | None = None) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
@@ -537,13 +540,14 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     # of what target_email logic below would otherwise pick. Remove this line,
     # keep the real logic beneath it, once you're done testing.
     send_to = TEST_EMAIL_OVERRIDE if target_email else None
+    CC_email_placeholder = TEST_EMAIL_OVERRIDE if CC_emails else None
     # send_to = target_email  # <- real logic, re-enable this once override is removed
 
     if send_to:
         response = requests.post(
             f"{BASE_URL}/tickets/{ticket_id}/reply_to_forward",
             auth=AUTH,
-            json={"body": message_text, "to_emails": [send_to]},
+            json={"body": message_text, "to_emails": [send_to], "cc_emails": CC_email_placeholder or []},
             timeout=15,
         )
     else:
@@ -598,6 +602,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         assign = 2
     reply_message = decision["reply"]
     target_email = decision.get("_target_email")
+    CC_emails = decision.get("_CC_emails", [])
 
     special_agent = None
     if decision["category"] == "intercom" and assign == 2:
@@ -607,7 +612,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             print(f"Ticket {ticket_id}: address matches non-configurable intercom list, routing to special agent")
 
     try:
-        reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent)
+        reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent, CC_emails)
         target = "intercom agent" if special_agent else "AI agent" if assign == 1 else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:

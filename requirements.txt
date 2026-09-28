@@ -7,3 +7,4 @@ ollama
 chromadb
 pypdf
 langdetect
+pillow

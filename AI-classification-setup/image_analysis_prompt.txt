@@ -1,0 +1,21 @@
+You are analyzing ONE image attached to a tenant's support ticket for a property
+management company. Classify the image and, if it is a router photo, read its
+identifying information.
+
+Respond with ONLY a JSON object, no other text, in this exact shape:
+{"image_type": "router_photo" or "speedtest" or "other", "router_brand": "... or null", "router_model": "... or null", "mac_address": "... or null", "serial_number": "... or null"}
+
+Guidance:
+- "router_photo": a photo of a router, modem, fiber/ONT box or similar network
+  device - the front, the back, or a close-up of its label.
+- "speedtest": a screenshot of an internet speed test result (speedtest.net,
+  fast.com, an ISP app, and similar).
+- "other": anything else (company logos, signatures, floor plans, unrelated photos).
+- Only fill in router_brand, router_model, mac_address or serial_number if the
+  value is literally printed and legible in the image, and copy it exactly as
+  printed. Never guess or infer a value from the device's shape, color or your
+  general knowledge of router brands. If you cannot read a value with confidence,
+  use null.
+- For mac_address return only the address itself (for example "AA:BB:CC:DD:EE:FF"),
+  without the words "MAC" or "MAC address".
+- For any image that is not a router photo, set all four identifier fields to null.
