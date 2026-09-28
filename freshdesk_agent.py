@@ -4,6 +4,7 @@ import json
 import secrets
 import re
 import hashlib
+import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -710,6 +711,14 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
 
     return saved_paths
 
+
+def cleanup_ticket_files(ticket_id: int):
+    """Delete the attachment folder for a ticket after processing."""
+    ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
+
+    if ticket_dir.exists():
+        shutil.rmtree(ticket_dir, ignore_errors=True)
+        print(f"Deleted attachment folder: {ticket_dir}")
 
 def add_private_note(ticket_id: int, note_html: str) -> None:
     """Add an internal note only agents can see (the tenant never receives it)."""
