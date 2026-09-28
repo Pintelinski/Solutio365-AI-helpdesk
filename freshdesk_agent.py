@@ -3,6 +3,7 @@ import os
 import json
 import secrets
 import re
+import hashlib
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -40,6 +41,10 @@ CLASSIFICATION_SYSTEM_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
 PDF_EXTRACTION_PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "pdf_extraction_prompt.txt"
 PDF_EXTRACTION_PROMPT = PDF_EXTRACTION_PROMPT_PATH.read_text(encoding="utf-8")
+
+IMAGE_ANALYSIS_PROMPT_PATH = Path(__file__).parent / "AI-classification-setup" / "image_analysis_prompt.txt"
+IMAGE_ANALYSIS_PROMPT = IMAGE_ANALYSIS_PROMPT_PATH.read_text(encoding="utf-8")
+
 DetectorFactory.seed = 0
 LANGUAGE_MAP = {"nl": "Dutch", "en": "English"}
 
@@ -52,9 +57,16 @@ ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
 VALID_CATEGORIES = ("wifi", "intercom", "other")
 
+MIN_PDF_IMAGE_DIMENSION = 250   # px - embedded PDF images smaller than this on either side are skipped
+MAX_PDF_IMAGES = 6              # per PDF
+MAX_IMAGES_TO_ANALYZE = 4       # per ticket
+MAX_IMAGE_SIDE = 2000           # px - larger extracted PDF images are scaled down
+VALID_IMAGE_TYPES = ("router_photo", "speedtest", "other")
+MAC_PATTERN = re.compile(r"(?:[0-9A-Fa-f]{2}[:\-.]?){5}[0-9A-Fa-f]{2}")
+
 URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
-EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
+EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
 NAME_BEFORE_EMAIL_PATTERN_TEMPLATE = r"([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+){0,3})\s*<\s*__EMAIL__\s*>"
 FORBIDDEN_EMAIL_DOMAINS = {
     domain.strip().lower().lstrip("@")
@@ -68,9 +80,7 @@ FORBIDDEN_EMAIL_ADDRESSES = {
 }
 ALLOWED_EMAIL_TLDS = {
     f".{tld.strip().lower().lstrip('.')}"
-    for tld in os.getenv(
-        "ALLOWED_EMAIL_TLDS",
-    ).split(",")
+    for tld in os.getenv("ALLOWED_EMAIL_TLDS", "com,net,org,nl").split(",")
     if tld.strip()
 }
 
@@ -112,10 +122,56 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
-    """Download PDF attachments and extract their raw text content."""
+def extract_pdf_images(reader: PdfReader, out_dir: Path, prefix: str) -> list[Path]:
+    """Save the meaningful images embedded in a PDF (e.g. a speedtest or router
+    photo in a 'bijlage') so they can be analyzed like any other image.
+    Skips small decorative images (logos, icons) and exact duplicates, and
+    re-encodes everything as PNG so the vision model always gets a readable file."""
+    saved = []
+    seen_hashes = set()
+    safe_prefix = re.sub(r"[^\w\-]", "_", prefix)
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        try:
+            page_images = list(page.images)
+        except Exception as e:
+            print(f"Could not read images on page {page_number} of {prefix}: {e}")
+            continue
+
+        for index, image in enumerate(page_images):
+            if len(saved) >= MAX_PDF_IMAGES:
+                return saved
+            try:
+                digest = hashlib.md5(image.data).hexdigest()
+                if digest in seen_hashes:
+                    continue
+                seen_hashes.add(digest)
+
+                pil_image = image.image
+                width, height = pil_image.size
+                if width < MIN_PDF_IMAGE_DIMENSION or height < MIN_PDF_IMAGE_DIMENSION:
+                    continue
+
+                if pil_image.mode not in ("RGB", "L"):
+                    pil_image = pil_image.convert("RGB")
+                pil_image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
+
+                out_dir.mkdir(parents=True, exist_ok=True)
+                file_path = out_dir / f"{safe_prefix}_p{page_number}_{index}.png"
+                pil_image.save(file_path, format="PNG")
+                saved.append(file_path)
+                print(f"Saved image from PDF: {file_path} ({width}x{height})")
+            except Exception as e:
+                print(f"Skipping unreadable image {index} on page {page_number} of {prefix}: {e}")
+
+    return saved
+
+
+def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> tuple[str, list[Path]]:
+    """Download PDF attachments. Returns (raw text, images embedded in the PDFs)."""
     ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
     extracted_texts = []
+    pdf_images = []
 
     for attachment in attachments:
         if attachment.get("content_type") != "application/pdf":
@@ -135,10 +191,12 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> str:
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             extracted_texts.append(text)
             print(f"Extracted raw text from PDF {name} ({len(text)} chars)")
+
+            pdf_images.extend(extract_pdf_images(reader, ticket_dir, file_path.stem))
         except Exception as e:
             print(f"Failed to process PDF {name}: {e}")
 
-    return "\n\n".join(extracted_texts)
+    return "\n\n".join(extracted_texts), pdf_images
 
 
 def find_download_links(text: str) -> list[str]:
@@ -149,14 +207,14 @@ def find_download_links(text: str) -> list[str]:
     return URL_PATTERN.findall(text)
 
 
-def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | None]:
+def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, list[Path]]:
     """Try to download a URL found in ticket text and treat it as a PDF or
-    image based on its actual Content-Type (not the URL's appearance, since
-    that can't be trusted). Returns (pdf_text, image_path) - either may be
-    empty/None. Applies basic safety limits since this URL comes from
-    untrusted ticket content: http(s) only, size-capped, short timeout."""
+    image based on the file's actual content (generic download endpoints often
+    send a useless Content-Type). Returns (pdf_text, image_paths). Applies
+    basic safety limits since this URL comes from untrusted ticket content:
+    http(s) only, size-capped, short timeout."""
     if not url.lower().startswith(("http://", "https://")):
-        return "", None
+        return "", []
 
     try:
         response = requests.get(url, timeout=15, stream=True, allow_redirects=True)
@@ -165,14 +223,14 @@ def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | No
         content_length = response.headers.get("Content-Length")
         if content_length and int(content_length) > MAX_DOWNLOAD_BYTES:
             print(f"Skipping linked document (too large): {url}")
-            return "", None
+            return "", []
 
         content = b""
         for chunk in response.iter_content(chunk_size=65536):
             content += chunk
             if len(content) > MAX_DOWNLOAD_BYTES:
                 print(f"Aborting download (exceeded size limit): {url}")
-                return "", None
+                return "", []
 
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
 
@@ -186,7 +244,7 @@ def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | No
             reader = PdfReader(file_path)
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             print(f"Downloaded and extracted linked PDF from {url} ({len(text)} chars)")
-            return text, None
+            return text, extract_pdf_images(reader, ticket_dir, "linked_document")
 
         if is_image:
             ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -194,14 +252,15 @@ def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, Path | No
             file_path = ticket_dir / f"linked_image.{ext}"
             file_path.write_bytes(content)
             print(f"Downloaded linked image from {url}")
-            return "", file_path
+            return "", [file_path]
 
         print(f"Skipping linked document (unsupported content type '{content_type}'): {url}")
-        return "", None
+        return "", []
 
     except requests.exceptions.RequestException as e:
         print(f"Failed to download linked document from {url}: {e}")
-        return "", None
+        return "", []
+
 
 def extract_ticket_context(text: str) -> dict:
     """Use the model to pull clean fields out of noisy source text - a PDF
@@ -223,6 +282,128 @@ def extract_ticket_context(text: str) -> dict:
     result = _parse_model_json(response.message.content) or {}
     print(f"Ticket context extraction result: {result}")
     return result
+
+
+def normalize_mac(value) -> str | None:
+    """Sanity-check a MAC address read from a photo. Vision models misread
+    characters, so anything that isn't 12 hex digits is dropped, not trusted."""
+    if not isinstance(value, str):
+        return None
+    match = MAC_PATTERN.search(value)
+    if not match:
+        return None
+    hex_only = re.sub(r"[^0-9A-Fa-f]", "", match.group(0)).upper()
+    if len(hex_only) != 12:
+        return None
+    return ":".join(hex_only[i:i + 2] for i in range(0, 12, 2))
+
+
+def clean_image_analysis(analysis: dict) -> dict:
+    """Normalize the vision model's JSON so the rest of the code can rely on it."""
+    def clean_text(value):
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not value or value.lower() in ("null", "none", "unknown", "n/a"):
+            return None
+        return value
+
+    image_type = analysis.get("image_type")
+    if image_type not in VALID_IMAGE_TYPES:
+        image_type = "other"
+
+    cleaned = {
+        "file": analysis.get("file"),
+        "image_type": image_type,
+        "router_brand": clean_text(analysis.get("router_brand")),
+        "router_model": clean_text(analysis.get("router_model")),
+        "serial_number": clean_text(analysis.get("serial_number")),
+        "mac_address": normalize_mac(analysis.get("mac_address")),
+    }
+
+    if image_type != "router_photo":
+        for key in ("router_brand", "router_model", "serial_number", "mac_address"):
+            cleaned[key] = None
+
+    return cleaned
+
+
+def analyze_images(image_paths: list[Path]) -> list[dict]:
+    """Classify each image (router photo / speedtest / other) and read router
+    identifiers off router photos. One image per call - small vision models
+    mix things up when given several at once."""
+    analyses = []
+    for path in image_paths[:MAX_IMAGES_TO_ANALYZE]:
+        try:
+            response = ollama_client.chat(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": IMAGE_ANALYSIS_PROMPT},
+                    {"role": "user", "content": "Analyze this image.", "images": [path.read_bytes()]},
+                ],
+                format="json",
+                think=False,
+                options={"num_ctx": 8192, "temperature": 0.1, "num_thread": 6},
+            )
+            raw = _parse_model_json(response.message.content) or {}
+        except Exception as e:
+            print(f"Image analysis failed for {path.name}: {e}")
+            continue
+
+        raw["file"] = path.name
+        analysis = clean_image_analysis(raw)
+        print(f"Image analysis for {path.name}: {analysis}")
+        analyses.append(analysis)
+
+    return analyses
+
+
+def format_image_notes(analyses: list[dict], total_images: int) -> str:
+    """Turn the analysis results into short notes for the classification model.
+    Deliberately contains no MAC addresses or serial numbers - the reply only
+    needs to know whether the label was readable, and the real values go to
+    the private note for the helpdesk instead."""
+    if total_images == 0:
+        return "[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
+
+    lines = []
+    for number, analysis in enumerate(analyses, start=1):
+        if analysis["image_type"] == "router_photo":
+            has_identifiers = any(analysis[key] for key in ("router_brand", "router_model", "serial_number", "mac_address"))
+            if has_identifiers:
+                lines.append(f"[Image {number}: router photo received, identifying information on the label is readable]")
+            else:
+                lines.append(f"[Image {number}: router photo received, but no identifying information on the label is readable]")
+        elif analysis["image_type"] == "speedtest":
+            lines.append(f"[Image {number}: speedtest screenshot received]")
+        else:
+            lines.append(f"[Image {number}: other image, not a router photo or speedtest]")
+
+    skipped = total_images - len(analyses)
+    if skipped > 0:
+        lines.append(f"[{skipped} more image(s) were attached but could not be analyzed.]")
+
+    return "\n".join(lines)
+
+
+def build_internal_note(analyses: list[dict]) -> str:
+    """Private note for the helpdesk with the router details read from photos.
+    Returns an empty string if there is nothing worth noting."""
+    lines = []
+    for number, analysis in enumerate(analyses, start=1):
+        if analysis["image_type"] != "router_photo":
+            continue
+        details = [
+            f"{label}: {analysis[key]}"
+            for label, key in (("Brand", "router_brand"), ("Model", "router_model"), ("MAC", "mac_address"), ("Serial", "serial_number"))
+            if analysis.get(key)
+        ]
+        detail_text = ", ".join(details) if details else "no identifying information readable"
+        lines.append(f"Image {number} ({analysis['file']}): {detail_text}")
+
+    if not lines:
+        return ""
+    return "Router details read from the attached image(s) by the AI - please verify against the photo:<br>" + "<br>".join(lines)
 
 
 def detect_reply_language(pdf_context: dict, description: str) -> str:
@@ -260,9 +441,9 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
 
 
 def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "", requester_name: str | None = None) -> dict:
-    """Ask the local model to classify the ticket and draft a reply.
-    If image_paths is given, the images are attached to the user message so
-    the model can look at them directly (e.g. a photo of a router)."""
+    """Classify the ticket and draft a reply. Images are analyzed in their own
+    focused pass first; the final call only sees short text notes about them,
+    so it stays text-only (faster, and it can't hallucinate about images)."""
     retrieval_query = f"{description}\n{pdf_text}".strip()
     relevant_issues = retrieve_relevant_issues(retrieval_query)
 
@@ -271,6 +452,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     source_text = pdf_text if pdf_text.strip() else description
     context = extract_ticket_context(source_text)
     reply_language = detect_reply_language(context, description)
+
+    image_analyses = analyze_images(image_paths)
 
     combined_text = f"{description}\n{pdf_text}"
     target_email, CC_emails = select_target_email(description, pdf_text)
@@ -281,10 +464,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         print(f"Rejecting tenant_full_name (not actually a full name): {full_name!r}")
         full_name = None
 
-    if image_paths:
-        message_text = f"{description}\n\n[{len(image_paths)} image attachment(s) are included with this message.]"
-    else:
-        message_text = f"{description}\n\n[No image attachments were included with this message. Do not claim to have seen a photo or screenshot.]"
+    message_text = f"{description}\n\n{format_image_notes(image_analyses, len(image_paths))}"
 
     if context.get("problem_description"):
         message_text += f"\n\n[Extracted problem description (use this, not the raw text above, as the tenant's actual issue): {context['problem_description']}]"
@@ -304,15 +484,11 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
 
-    user_message = {"role": "user", "content": message_text}
-    if image_paths:
-        user_message["images"] = [path.read_bytes() for path in image_paths]
-
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
-            user_message,
+            {"role": "user", "content": message_text},
         ],
         format="json",
         think=False,
@@ -327,17 +503,17 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
-    if (
-    result is None or result.get("category") not in VALID_CATEGORIES or "reply" not in result):
+    if result is None or result.get("category") not in VALID_CATEGORIES or "reply" not in result:
         print(f"Model returned unexpected output, falling back to human handoff. Parsed as: {result}")
         return {"category": "other", "missing_info": [], "reply": "Hi, thanks for reaching out. Our team will contact you soon."}
- 
+
     if not isinstance(result.get("missing_info"), list):
         result["missing_info"] = []
 
     result["_target_email"] = target_email
     result["_extracted_address"] = context.get("location")
     result["_CC_emails"] = CC_emails
+    result["_image_analyses"] = image_analyses
     return result
 
 
@@ -379,8 +555,9 @@ def validate_target_email(target_email: str | None, description: str, pdf_text: 
     return target_email.strip()
 
 
-def select_target_email(description: str, pdf_text: str) -> str | None:
-    """Choose the first source email that is not on the forbidden lists.
+def select_target_email(description: str, pdf_text: str) -> tuple[str | None, list[str]]:
+    """Choose the first source email that is not on the forbidden lists,
+    and return the remaining eligible ones as CC candidates.
 
     The source text is authoritative; the language model is not asked to
     guess which address should receive the reply.
@@ -407,7 +584,7 @@ def select_target_email(description: str, pdf_text: str) -> str | None:
 
     target_email = allowed[0] if allowed else None
     print(f"Eligible target emails: {allowed}; selected target email: {target_email!r}")
-    CC_emails = [email for email in allowed[1:]] if len(allowed) > 1 else []
+    CC_emails = allowed[1:] if len(allowed) > 1 else []
     return target_email, CC_emails
 
 
@@ -440,6 +617,7 @@ def is_non_configurable_intercom(address: str | None) -> bool:
             return True
     return False
 
+
 def find_name_near_email(text: str, email: str | None) -> str | None:
     """Forwarded emails almost always include a 'Name <email>' header line
     (e.g. 'Van: Yordan Rusev <rusev3005@gmail.com>'). This is a highly
@@ -450,6 +628,7 @@ def find_name_near_email(text: str, email: str | None) -> str | None:
     pattern = re.compile(NAME_BEFORE_EMAIL_PATTERN_TEMPLATE.replace("__EMAIL__", re.escape(email)), re.IGNORECASE)
     match = pattern.search(text)
     return match.group(1).strip() if match else None
+
 
 def normalize_email_value(value) -> str | None:
     """The model sometimes returns a list of emails instead of a single
@@ -466,6 +645,10 @@ def normalize_email_value(value) -> str | None:
         return value.strip() or None
     return None
 
+
+# ---------------------------------------------------------------------------
+# Freshdesk I/O
+# ---------------------------------------------------------------------------
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
     """Fetch the full ticket from Freshdesk and return both:
@@ -528,6 +711,16 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
     return saved_paths
 
 
+def add_private_note(ticket_id: int, note_html: str) -> None:
+    """Add an internal note only agents can see (the tenant never receives it)."""
+    response = requests.post(
+        f"{BASE_URL}/tickets/{ticket_id}/notes",
+        auth=AUTH,
+        json={"body": note_html, "private": True},
+        timeout=15,
+    )
+    response.raise_for_status()
+
 
 def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None, CC_emails: list[str] | None = None) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
@@ -537,17 +730,18 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
     message_text = message_html.replace("\n", "<br>")
 
     # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
-    # of what target_email logic below would otherwise pick. Remove this line,
-    # keep the real logic beneath it, once you're done testing.
+    # of what target_email logic below would otherwise pick. Remove these lines,
+    # keep the real logic beneath them, once you're done testing.
     send_to = TEST_EMAIL_OVERRIDE if target_email else None
-    CC_email_placeholder = TEST_EMAIL_OVERRIDE if CC_emails else None
+    cc_list = [TEST_EMAIL_OVERRIDE] if (CC_emails and TEST_EMAIL_OVERRIDE) else []
     # send_to = target_email  # <- real logic, re-enable this once override is removed
+    # cc_list = CC_emails or []  # <- real logic, re-enable this once override is removed
 
     if send_to:
         response = requests.post(
             f"{BASE_URL}/tickets/{ticket_id}/reply_to_forward",
             auth=AUTH,
-            json={"body": message_text, "to_emails": [send_to], "cc_emails": CC_email_placeholder or []},
+            json={"body": message_text, "to_emails": [send_to], "cc_emails": cc_list},
             timeout=15,
         )
     else:
@@ -577,18 +771,19 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     waiting on the model."""
     attachments, inline_image_urls = get_ticket_attachments(ticket_id)
     image_paths = download_image_attachments(ticket_id, attachments, inline_image_urls)
-    print(f"Ticket {ticket_id}: saved {len(image_paths)} image(s) total to {ATTACHMENTS_DIR / str(ticket_id)}")
 
-    pdf_text = download_and_extract_pdfs(ticket_id, attachments)
+    pdf_text, pdf_images = download_and_extract_pdfs(ticket_id, attachments)
+    image_paths.extend(pdf_images)
 
     if not pdf_text.strip():
         ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
         for url in find_download_links(description):
-            linked_text, linked_image_path = download_linked_document(url, ticket_dir)
+            linked_text, linked_images = download_linked_document(url, ticket_dir)
             if linked_text:
                 pdf_text += f"\n\n{linked_text}"
-            if linked_image_path:
-                image_paths.append(linked_image_path)
+            image_paths.extend(linked_images)
+
+    print(f"Ticket {ticket_id}: {len(image_paths)} image(s) total in {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
     missing_info = decision.get("missing_info", [])
@@ -617,6 +812,14 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
+
+    note = build_internal_note(decision.get("_image_analyses", []))
+    if note:
+        try:
+            add_private_note(ticket_id, note)
+            print(f"Added private note with router details to ticket {ticket_id}")
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to add private note to ticket {ticket_id}: {e}")
 
 
 @app.post("/freshdesk-webhook", status_code=202)
