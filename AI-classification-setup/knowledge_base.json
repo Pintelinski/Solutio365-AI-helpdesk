@@ -3,13 +3,13 @@
     "id": "wifi_slow_generic",
     "category": "wifi_info_needed",
     "description": "Tenant reports slow WiFi with no further diagnostic details provided yet.",
-    "guidance": "Ask for a speedtest screenshot (speedtest.net) and the tenant's address before diagnosing further."
+    "guidance": "Ask for a speedtest screenshot (speedtest.net), a photo of the router and the tenant's address before diagnosing further."
   },
   {
     "id": "wifi_symptoms_indirect",
     "category": "wifi_info_needed",
     "description": "Tenant describes symptoms like messages not sending, videos not loading, or apps not connecting, without naming wifi or internet directly.",
-    "guidance": "Recognize this as a likely connectivity issue even without the words 'wifi' or 'internet'. Ask for a speedtest screenshot and address."
+    "guidance": "Recognize this as a likely connectivity issue even without the words 'wifi' or 'internet'. Ask for a speedtest screenshot, a photo of the router and address."
   },
   {
     "id": "wifi_hardware_no_lights",
@@ -27,7 +27,7 @@
     "id": "wifi_good_router_slow_overall",
     "category": "wifi_resolved",
     "description": "Router lights appear normal but speeds are still lower than expected overall (not room-specific).",
-    "guidance": "Suggest restarting the router (unplug 30 seconds, plug back in) and checking how many devices are connected at once."
+    "guidance": "Suggest restarting the router (unplug 30 seconds, plug back in) and checking how many devices are connected at once. If it does not work, send a speedtest screenshot, a photo of the router and the tenant's address to the team for further diagnosis."
   },
   {
     "id": "non_wifi_general",

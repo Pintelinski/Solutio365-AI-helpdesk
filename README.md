@@ -174,6 +174,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 nano .env   # fill in your actual environment variables
+sudo mkdir attachments
+sudo chown -R ai-agent:ai-agent ~/<your-directory-name>/attachments
 ```
 
 9. Pull models and seed the knowledge base:
