@@ -467,9 +467,10 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     missing_info = []
     message_text = f"{description}\n\n{format_image_notes(image_analyses, len(image_paths))}"
-    if not message_text.contains("speedtest"):
+    if "speedtest" not in message_text.lower():
         missing_info.append("speedtest screenshot")
-    if not message_text.contains("router photo"):
+
+    if "router" not in message_text.lower():
         missing_info.append("router photo")
 
     if context.get("problem_description"):
