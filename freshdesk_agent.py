@@ -465,25 +465,42 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         print(f"Rejecting tenant_full_name (not actually a full name): {full_name!r}")
         full_name = None
 
+    missing_info = []
     message_text = f"{description}\n\n{format_image_notes(image_analyses, len(image_paths))}"
+    if not message_text.contains("speedtest"):
+        missing_info.append("speedtest screenshot")
+    if not message_text.contains("router photo"):
+        missing_info.append("router photo")
 
     if context.get("problem_description"):
         message_text += f"\n\n[Extracted problem description (use this, not the raw text above, as the tenant's actual issue): {context['problem_description']}]"
     if context.get("location"):
         message_text += f"\n[Extracted address/location: {context['location']}]"
+    else:
+        missing_info.append("address/location")
     if context.get("permission_to_enter") and pdf_text.strip():
         message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
+    else:
+        missing_info.append("permission to enter home")
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
+    else:
+        missing_info.append("tenant name")
     if full_name:
         message_text += f"\n[Extracted tenant full name (for intercom tickets): {full_name}]"
+    else:
+        missing_info.append("tenant full name")
     if context.get("phone_number"):
         message_text += f"\n[Extracted phone number: {context['phone_number']}]"
+    else:
+        missing_info.append("phone number")
 
     message_text += f"\n\n[REQUIRED REPLY LANGUAGE: {reply_language}. This has already been determined for you - write your entire reply in {reply_language}, regardless of any other language appearing elsewhere in this message.]"
 
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
+
+    message_text += f"\n\n[Missing information that should be requested from the tenant: {', '.join(missing_info) if missing_info else 'none'}]"
 
     print("Message_text debugging: ", message_text)
 
