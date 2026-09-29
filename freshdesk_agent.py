@@ -281,7 +281,6 @@ def extract_ticket_context(text: str) -> dict:
         options={"num_ctx": 16384, "temperature": 0.2},
     )
     result = _parse_model_json(response.message.content) or {}
-    print(f"Ticket context extraction result: {result}")
     return result
 
 
@@ -503,8 +502,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
 
-    print("Message_text debugging: ", message_text)
-
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
@@ -521,7 +518,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         print(f"Model reasoning (not sent to tenant): {thinking}")
 
     content = response.message.content
-    print(f"Model raw output: {content!r}")
 
     result = _parse_model_json(content)
     if result is None or result.get("category") not in VALID_CATEGORIES or "reply" not in result:
