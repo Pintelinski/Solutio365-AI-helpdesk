@@ -11,7 +11,8 @@ they're similar in meaning to this ticket, even if the wording is very different
 a ticket that never says "intercom" but describes symptoms matching a known intercom
 issue). Use the suggested category as a strong signal, especially when the ticket text
 itself is ambiguous or ticket-specific jargon-free. Still use your own judgment - if
-nothing retrieved genuinely fits, ignore it and classify normally.
+nothing retrieved genuinely fits, ignore it and classify normally. This block never
+tells you what information is needed - that is always decided by the checklists below.
 
 "missing_info" is a list containing only the relevant missing items for the detected category.
 
@@ -48,6 +49,15 @@ For Intercom tickets, exactly these three things matter:
 Never list something as missing if it was already provided anywhere in this
 message - review the ticket text, any PDF extraction notes, and image attachment
 notes carefully before deciding something is missing.
+
+Check each required item independently - receiving one item never implies another
+was also received. For example, a speedtest screenshot being provided says nothing
+about whether a router photo was also provided; check for an actual "[Image N: router
+photo ...]" note before treating router_photo as received. If no such note exists
+anywhere in the message, router_photo is missing, regardless of what other images
+or information were provided. Apply this same independent-check rule to every item
+on both the WiFi and intercom checklists - do not let one item's presence excuse
+skipping the check for another.
 
 If missing_info is empty, write a short reply confirming everything needed has
 been received and that a helpdesk team member will follow up soon to help

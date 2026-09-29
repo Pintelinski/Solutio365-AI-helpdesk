@@ -762,7 +762,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
         )
     response.raise_for_status()
 
-    responder_id = special_agent if special_agent else (SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID)
+    responder_id = special_agent if special_agent else (SUPPORT_EMPLOYEE_ID if assign == 1 else SUPPORT_AGENT_ID)
     assign_response = requests.put(
         f"{BASE_URL}/tickets/{ticket_id}",
         auth=AUTH,
@@ -796,11 +796,8 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
     missing_info = decision.get("missing_info", [])
-    if decision["category"] == "wifi":
-        assign = 1 if missing_info else 2
-
-    elif decision["category"] == "intercom":
-        assign = 2
+    if ticket_id % 2 == 0:
+        assign = 1
 
     else:
         assign = 2
@@ -809,7 +806,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     CC_emails = decision.get("_CC_emails", [])
 
     special_agent = None
-    if decision["category"] == "intercom" and assign == 2:
+    if decision["category"] == "intercom":
         address = decision.get("_extracted_address")
         if is_non_configurable_intercom(address):
             special_agent = SUPPORT_AGENT_INTERCOM_ID
@@ -817,7 +814,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     try:
         reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent, CC_emails)
-        target = "intercom agent" if special_agent else "AI agent" if assign == 1 else "human employee"
+        target = "intercom agent" if special_agent else "human employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
