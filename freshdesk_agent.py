@@ -501,7 +501,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
 
-    message_text += f"\n\n[Missing information that should be requested from the tenant: {', '.join(missing_info) if missing_info else 'none'}]"
+    message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
 
     print("Message_text debugging: ", message_text)
 

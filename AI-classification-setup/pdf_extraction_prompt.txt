@@ -19,7 +19,8 @@ Guidance:
 - "tenant_name": the name of the actual tenant/resident reporting the problem -
   not a staff member, technician, or company contact name. Null if not present. This can be used to address the person in the reply.
 - "tenant_full_name": The tenant's first name AND surname together. Only fill this
-  in if BOTH are genuinely present somewhere in the text. If only a first name is
+  in if BOTH are genuinely present somewhere in the text. example is: "<firstname> <surname> / <firstname> <surname>".
+  If only a first name is
   visible anywhere (like an email sign-off with just "Pepijn"), set this to null -
   do NOT fill it with just the first name. Only needed for intercom-related issues.
 - "phone_number": the tenant's own phone number if present anywhere in the document.
