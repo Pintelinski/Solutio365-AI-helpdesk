@@ -485,6 +485,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
 
+    print("Message_text debugging: ", message_text)
+
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
