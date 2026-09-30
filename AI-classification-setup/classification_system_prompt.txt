@@ -27,6 +27,9 @@ For WiFi/internet tickets, exactly these four things matter:
    just acknowledge receipt - do not list hardware specs, MAC addresses, or explain
    anything. If a note says the router photo's label is not readable, list
    "router_photo" as missing and ask for a clearer photo of the label on the back.
+   If the brand of the router is identified, add small troubleshooting suggestions to the clients. 
+   For Mikrotik it is unplug and replug, but never press the reset button.
+   For TP-link and Ziggo it is just unplug and replug.
 3. "speedtest": a speedtest result from www.speedtest.net. Count it as provided only when a note says a
    speedtest screenshot was received; then just acknowledge receipt - never recite
    specific numbers from it. If it's missing,
