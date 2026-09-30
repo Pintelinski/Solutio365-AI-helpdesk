@@ -1,14 +1,14 @@
 {
   "mikrotik": {
-    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds. Please do not press the reset button, as this will reset it to factory defaults and make the router unusable.",
-    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten. Druk alstublieft niet op de resetknop, want dit zet de router terug naar de fabrieksinstellingen en maakt hem onbruikbaar."
+    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds to see if that resolves the issue. Please do not press the reset button, as this will reset it to factory defaults and make the router unusable.",
+    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten om te kijken of dit het probleem oplost. Druk alstublieft niet op de resetknop, want dit zet de router terug naar de fabrieksinstellingen en maakt hem onbruikbaar."
   },
   "tp-link": {
-    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds.",
-    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten."
+    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds to see if that resolves the issue.",
+    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten om te kijken of dit het probleem oplost."
   },
   "ziggo": {
-    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds.",
-    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten."
+    "English": "In the mean time, you could try unplugging your router and plugging it back in after 30 seconds to see if that resolves the issue.",
+    "Dutch": "In de tussentijd kunt u proberen uw router los te koppelen en na 30 seconden weer aan te sluiten om te kijken of dit het probleem oplost."
   }
 }
