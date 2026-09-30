@@ -86,6 +86,7 @@ ALLOWED_EMAIL_TLDS = {
 }
 
 NON_CONFIGURABLE_ADDRESSES_PATH = Path(__file__).parent / "AI-classification-setup" / "non_configurable_intercom_addresses.json"
+ROUTER_TIPS_PATH = Path(__file__).parent / "AI-classification-setup" / "router_troubleshooting_tips.json"
 
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
@@ -531,6 +532,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     result["_extracted_address"] = context.get("location")
     result["_CC_emails"] = CC_emails
     result["_image_analyses"] = image_analyses
+    result["_reply_language"] = reply_language
     return result
 
 
@@ -635,6 +637,39 @@ def is_non_configurable_intercom(address: str | None) -> bool:
     return False
 
 
+def get_router_tip(image_analyses: list[dict], reply_language: str) -> str | None:
+    """Look up a fixed, pre-translated troubleshooting tip if a router photo's
+    brand was identified. Fixed wording, not model-generated - this is exactly
+    the kind of "must be worded precisely" content (e.g. Mikrotik's
+    reset-button warning) that shouldn't depend on a model rephrasing it
+    correctly under temperature/translation each time."""
+    try:
+        tips = json.loads(ROUTER_TIPS_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+    for analysis in image_analyses:
+        if analysis.get("image_type") != "router_photo":
+            continue
+        brand = (analysis.get("router_brand") or "").strip().lower()
+        if not brand:
+            continue
+        for known_brand, translations in tips.items():
+            if known_brand in brand or brand in known_brand:
+                return translations.get(reply_language) or translations.get("English")
+    return None
+
+
+def insert_tip_before_closing(reply_text: str, tip: str) -> str:
+    """Splice the tip in right before the closing line, rather than asking
+    the model to place it - the closing lines are fixed, known strings
+    (enforced by the prompt), so we can find them reliably."""
+    for closing in ("Met vriendelijke groet,\nSupport team Solutio365", "Greetings,\nSupport team Solutio365"):
+        if closing in reply_text:
+            return reply_text.replace(closing, f"{tip}\n\n{closing}")
+    return f"{reply_text}\n\n{tip}"
+
+
 def find_name_near_email(text: str, email: str | None) -> str | None:
     """Forwarded emails almost always include a 'Name <email>' header line
     (e.g. 'Van: Yordan Rusev <rusev3005@gmail.com>'). This is a highly
@@ -662,10 +697,6 @@ def normalize_email_value(value) -> str | None:
         return value.strip() or None
     return None
 
-
-# ---------------------------------------------------------------------------
-# Freshdesk I/O
-# ---------------------------------------------------------------------------
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
     """Fetch the full ticket from Freshdesk and return both:
@@ -820,6 +851,12 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     reply_message = decision["reply"]
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
+
+    if decision["category"] == "wifi":
+        tip = get_router_tip(decision.get("_image_analyses", []), decision.get("_reply_language", "English"))
+        if tip:
+            reply_message = insert_tip_before_closing(reply_message, tip)
+            print(f"Added router troubleshooting tip to ticket {ticket_id}")
 
     special_agent = None
     if decision["category"] == "intercom":
