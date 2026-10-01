@@ -656,7 +656,7 @@ def lookup_tv_manual(address: str | None) -> tuple[str | None, Path | None]:
     normalized_address = normalize_address(address)
     for known in tv_data.get("smart_iptv", []):
         if normalize_address(known) in normalized_address or normalized_address in normalize_address(known):
-            return "smart_iptv", TV_MANUALS_DIR / "smart_iptv_manual.pdf"
+            return "smart_iptv", TV_MANUALS_DIR / "Instructie SMART IPTV(2025).pdf"
     for known, filename in tv_data.get("ssiptv", {}).items():
         if normalize_address(known) in normalized_address or normalized_address in normalize_address(known):
             return "ssiptv", TV_MANUALS_DIR / filename
