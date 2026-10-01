@@ -910,7 +910,25 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             body = templates["need_address"][reply_language]
         else:
             system, manual_path = lookup_tv_manual(address)
-            body = templates["address_not_recognized"][reply_language] if system is None else templates[system][reply_language]
+            if system is None:
+                body = templates["address_not_recognized"][reply_language]
+            elif "Galvanistraat" or "Lee towers" in address:
+                number_match = re.search(r"\d+", address)
+
+                if number_match:
+                    address_number = int(number_match.group())
+                    tower = 2 if address_number > 1090 else 1
+                else:
+                    tower = None
+
+                tower_note = (
+                    f"\n\nNote: Your address says you live in tower {tower}, "
+                    "so please pay attention to that when following the instructions."
+                    if tower
+                    else ""
+                )
+
+                body = templates[system][reply_language] + tower_note
 
         reply_message = f"{greeting}\n\n{body}\n\n{closing}"
         attach = manual_path if address and system else None

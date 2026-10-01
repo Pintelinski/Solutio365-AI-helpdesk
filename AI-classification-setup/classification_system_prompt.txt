@@ -52,7 +52,7 @@ For TV tickets, only one thing matters right now:
 The "reply" field for TV tickets is not used (it gets replaced automatically) - write
 any short placeholder text.
 
-If the ticket is about cloud storage, DNS, or mobile/cellular data - NOT WiFi, NOT
+If the ticket is about cloud storage, DNS, or mobile/cellular - NOT WiFi, NOT
 intercom, NOT TV - set category to "ignore", leave missing_info empty, and write any
 short placeholder text for "reply" (it will not be used; these get no reply and no
 assignment at all).
