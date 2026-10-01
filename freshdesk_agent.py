@@ -507,6 +507,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
 
+    print(message_text)
+    
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
