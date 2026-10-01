@@ -883,6 +883,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     print(f"Ticket {ticket_id}: {len(image_paths)} image(s) total in {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
+    print(decision)
 
     if decision["category"] == "ignore":
         print(f"Ticket {ticket_id}: classified as ignore, no reply or assignment.")
