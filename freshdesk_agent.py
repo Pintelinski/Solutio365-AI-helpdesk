@@ -508,7 +508,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
 
     print(message_text)
-    
+
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[
@@ -915,7 +915,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             system, manual_path = lookup_tv_manual(address)
             if system is None:
                 body = templates["address_not_recognized"][reply_language]
-            elif "Galvanistraat" or "Lee towers" in address:
+            elif "galvanistraat" in address.lower() or "lee towers" in address.lower():
                 number_match = re.search(r"\d+", address)
 
                 if number_match:
@@ -932,6 +932,8 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
                 )
 
                 body = templates[system][reply_language] + tower_note
+            else:
+                body = templates[system][reply_language]
 
         reply_message = f"{greeting}\n\n{body}\n\n{closing}"
         attach = manual_path if address and system else None
