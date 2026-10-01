@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 attachments/
 chroma_db/
+AI-classification-setup/non_configurable_intercom_addresses.json
+AI-classification-setup/tv_reply_templates.json
+AI-classification-setup/tv_addresses.json

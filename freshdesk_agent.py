@@ -56,7 +56,7 @@ known_issues_collection = chroma_client.get_collection(name="known_issues")
 
 ATTACHMENTS_DIR = Path(__file__).parent / "attachments"
 
-VALID_CATEGORIES = ("wifi", "intercom", "other")
+VALID_CATEGORIES = ("wifi", "intercom", "tv", "other", "ignore")
 
 MIN_PDF_IMAGE_DIMENSION = 250   # px - embedded PDF images smaller than this on either side are skipped
 MAX_PDF_IMAGES = 6              # per PDF
@@ -87,6 +87,10 @@ ALLOWED_EMAIL_TLDS = {
 
 NON_CONFIGURABLE_ADDRESSES_PATH = Path(__file__).parent / "AI-classification-setup" / "non_configurable_intercom_addresses.json"
 ROUTER_TIPS_PATH = Path(__file__).parent / "AI-classification-setup" / "router_troubleshooting_tips.json"
+
+TV_ADDRESSES_PATH = Path(__file__).parent / "AI-classification-setup" / "tv_addresses.json"
+TV_TEMPLATES_PATH = Path(__file__).parent / "AI-classification-setup" / "tv_reply_templates.json"
+TV_MANUALS_DIR = Path(__file__).parent / "AI-classification-setup" / "tv_manuals"
 
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
@@ -533,6 +537,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     result["_CC_emails"] = CC_emails
     result["_image_analyses"] = image_analyses
     result["_reply_language"] = reply_language
+    result["_tenant_name"] = tenant_name
     return result
 
 
@@ -635,6 +640,27 @@ def is_non_configurable_intercom(address: str | None) -> bool:
         if normalized_known in normalized_ticket_address or normalized_ticket_address in normalized_known:
             return True
     return False
+
+
+def lookup_tv_manual(address: str | None) -> tuple[str | None, Path | None]:
+    """Match an address against the TV system lists, same pattern as
+    is_non_configurable_intercom(). Returns (system, manual_path), or
+    (None, None) if no match."""
+    if not address:
+        return None, None
+    try:
+        tv_data = json.loads(TV_ADDRESSES_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, None
+
+    normalized_address = normalize_address(address)
+    for known in tv_data.get("smart_iptv", []):
+        if normalize_address(known) in normalized_address or normalized_address in normalize_address(known):
+            return "smart_iptv", TV_MANUALS_DIR / "smart_iptv_manual.pdf"
+    for known, filename in tv_data.get("ssiptv", {}).items():
+        if normalize_address(known) in normalized_address or normalized_address in normalize_address(known):
+            return "ssiptv", TV_MANUALS_DIR / filename
+    return None, None
 
 
 def get_router_tip(image_analyses: list[dict], reply_language: str) -> str | None:
@@ -778,12 +804,27 @@ def add_private_note(ticket_id: int, note_html: str) -> None:
     response.raise_for_status()
 
 
-def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None, CC_emails: list[str] | None = None) -> dict:
+def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None, CC_emails: list[str] | None = None, attachment_path: Path | None = None) -> dict:
     """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
     if not BASE_URL or not FRESHDESK_API_KEY:
         raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
 
     message_text = message_html.replace("\n", "<br>")
+
+    if attachment_path and attachment_path.exists():
+        with open(attachment_path, "rb") as f:
+            response = requests.post(
+                f"{BASE_URL}/tickets/{ticket_id}/reply",
+                auth=AUTH,
+                data={"body": message_text},
+                files=[("attachments[]", (attachment_path.name, f))],
+                timeout=30,
+            )
+        response.raise_for_status()
+        responder_id = special_agent if special_agent else (SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID)
+        assign_response = requests.put(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, json={"responder_id": responder_id}, timeout=15)
+        assign_response.raise_for_status()
+        return {"reply": response.json(), "assign": assign_response.json()}
 
     # TESTING OVERRIDE - forces all outgoing mail to your own address regardless
     # of what target_email logic below would otherwise pick. Remove these lines,
@@ -842,7 +883,12 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     print(f"Ticket {ticket_id}: {len(image_paths)} image(s) total in {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
-    missing_info = decision.get("missing_info", [])
+
+    if decision["category"] == "ignore":
+        print(f"Ticket {ticket_id}: classified as ignore, no reply or assignment.")
+        cleanup_ticket_files(ticket_id)
+        return
+
     if ticket_id % 2 == 0:
         assign = 1
 
@@ -851,6 +897,27 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     reply_message = decision["reply"]
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
+
+    if decision["category"] == "tv":
+        address = decision.get("_extracted_address")
+        reply_language = decision.get("_reply_language", "English")
+        name = decision.get("_tenant_name")
+        greeting = (f"Beste {name}," if reply_language == "Dutch" else f"Hi {name},") if name else ("Beste," if reply_language == "Dutch" else "Hi,")
+        closing = "Met vriendelijke groet,\nSupport team Solutio365" if reply_language == "Dutch" else "Greetings,\nSupport team Solutio365"
+        templates = json.loads(TV_TEMPLATES_PATH.read_text(encoding="utf-8"))
+
+        if not address:
+            body = templates["need_address"][reply_language]
+        else:
+            system, manual_path = lookup_tv_manual(address)
+            body = templates["address_not_recognized"][reply_language] if system is None else templates[system][reply_language]
+
+        reply_message = f"{greeting}\n\n{body}\n\n{closing}"
+        attach = manual_path if address and system else None
+        reply_to_ticket(ticket_id, reply_message, assign=1, target_email=decision.get("_target_email"), attachment_path=attach)
+        print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
+        cleanup_ticket_files(ticket_id)
+        return
 
     if decision["category"] == "wifi":
         tip = get_router_tip(decision.get("_image_analyses", []), decision.get("_reply_language", "English"))
