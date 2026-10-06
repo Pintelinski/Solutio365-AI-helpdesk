@@ -5,6 +5,8 @@ import secrets
 import re
 import hashlib
 import shutil
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -92,6 +94,12 @@ TV_ADDRESSES_PATH = Path(__file__).parent / "AI-classification-setup" / "tv_addr
 TV_TEMPLATES_PATH = Path(__file__).parent / "AI-classification-setup" / "tv_reply_templates.json"
 TV_MANUALS_DIR = Path(__file__).parent / "AI-classification-setup" / "tv_manuals"
 
+OFFICE_TIMEZONE = ZoneInfo("Europe/Amsterdam")
+OUT_OF_OFFICE_TEXT = {
+    "English": "Thank you for your ticket. Our support team is currently out of office. We are available Monday to Friday, 08:00-17:00. We will look into your ticket as soon as we are back.",
+    "Dutch": "Bedankt voor uw ticket. Ons supportteam is momenteel niet aanwezig. Wij zijn bereikbaar van maandag tot en met vrijdag van 08:00 tot 17:00 uur. We bekijken uw ticket zodra we weer aanwezig zijn.",
+}
+
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
 # ---------------------------------------------------------------
@@ -127,6 +135,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+def is_out_of_office(now: datetime | None = None) -> bool:
+    """Mon-Fri 08:00-17:00 Europe/Amsterdam = in office. Everything else
+    (evenings, nights, weekends) = out of office. Pure clock check."""
+    now = now or datetime.now(OFFICE_TIMEZONE)
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return True
+    return not (8 <= now.hour < 17)
 
 def extract_pdf_images(reader: PdfReader, out_dir: Path, prefix: str) -> list[Path]:
     """Save the meaningful images embedded in a PDF (e.g. a speedtest or router
@@ -892,18 +908,20 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         cleanup_ticket_files(ticket_id)
         return
 
+    reply_language = decision.get("_reply_language", "English")
+    ooo_prefix = f"{OUT_OF_OFFICE_TEXT[reply_language]}\n\n" if is_out_of_office() else ""
+
     if ticket_id % 2 == 0:
         assign = 1
 
     else:
         assign = 2
-    reply_message = decision["reply"]
+    reply_message = f"{ooo_prefix}{decision["reply"]}"
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
 
     if decision["category"] == "tv":
         address = decision.get("_extracted_address")
-        reply_language = decision.get("_reply_language", "English")
         name = decision.get("_tenant_name")
         greeting = (f"Beste {name}," if reply_language == "Dutch" else f"Hi {name},") if name else ("Beste," if reply_language == "Dutch" else "Hi,")
         closing = "Met vriendelijke groet,\nSupport team Solutio365" if reply_language == "Dutch" else "Greetings,\nSupport team Solutio365"
@@ -935,7 +953,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             else:
                 body = templates[system][reply_language]
 
-        reply_message = f"{greeting}\n\n{body}\n\n{closing}"
+        reply_message = f"{ooo_prefix}{greeting}\n\n{body}\n\n{closing}"
         attach = manual_path if address and system else None
         reply_to_ticket(ticket_id, reply_message, assign=1, target_email=decision.get("_target_email"), attachment_path=attach)
         print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
