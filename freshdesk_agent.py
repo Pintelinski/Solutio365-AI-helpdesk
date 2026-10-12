@@ -5,6 +5,9 @@ import secrets
 import re
 import hashlib
 import shutil
+import ipaddress
+import socket
+from urllib.parse import urlparse, urljoin
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -133,7 +136,7 @@ async def lifespan(app: FastAPI):
     ngrok.disconnect()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def is_out_of_office(now: datetime | None = None) -> bool:
@@ -199,7 +202,7 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> tuple[
         if attachment.get("content_type") != "application/pdf":
             continue
         url = attachment.get("attachment_url")
-        name = attachment.get("name", "attachment.pdf")
+        name = re.sub(r"[^\w.\-]", "_", Path(attachment.get("name") or "attachment.pdf").name).lstrip(".") or "attachment.pdf"
         if not url:
             continue
         try:
@@ -229,17 +232,39 @@ def find_download_links(text: str) -> list[str]:
     return URL_PATTERN.findall(text)
 
 
+def fetch_public_url(url: str, max_redirects: int = 5) -> requests.Response | None:
+    """GET a URL taken from untrusted ticket text (SSRF guard): https only, hosts must
+    resolve exclusively to public IPs, redirects followed manually so each hop is re-checked."""
+    for _ in range(max_redirects + 1):
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme != "https" or not parsed.hostname:
+                raise ValueError("not https")
+            infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+            if not infos or not all(ipaddress.ip_address(i[4][0]).is_global for i in infos):
+                raise ValueError("non-public address")
+        except (socket.gaierror, ValueError, UnicodeError) as e:
+            print(f"Blocked URL {url}: {e}")
+            return None
+        response = requests.get(url, timeout=15, stream=True, allow_redirects=False)
+        if not response.is_redirect:
+            return response
+        url = urljoin(url, response.headers["Location"])
+        response.close()
+    print("Too many redirects")
+    return None
+
+
 def download_linked_document(url: str, ticket_dir: Path) -> tuple[str, list[Path]]:
     """Try to download a URL found in ticket text and treat it as a PDF or
     image based on the file's actual content (generic download endpoints often
     send a useless Content-Type). Returns (pdf_text, image_paths). Applies
     basic safety limits since this URL comes from untrusted ticket content:
     http(s) only, size-capped, short timeout."""
-    if not url.lower().startswith(("http://", "https://")):
-        return "", []
-
     try:
-        response = requests.get(url, timeout=15, stream=True, allow_redirects=True)
+        response = fetch_public_url(url)
+        if response is None:
+            return "", []
         response.raise_for_status()
 
         content_length = response.headers.get("Content-Length")
@@ -487,10 +512,10 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     missing_info = []
     message_text = f"{description}\n\n{format_image_notes(image_analyses, len(image_paths))}"
-    if "speedtest" not in message_text.lower():
+    if not any(a["image_type"] == "speedtest" for a in image_analyses):
         missing_info.append("speedtest screenshot")
 
-    if "router" not in message_text.lower():
+    if not any(a["image_type"] == "router_photo" for a in image_analyses):
         missing_info.append("router photo")
 
     if context.get("problem_description"):
@@ -774,7 +799,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
         if not content_type.startswith("image/"):
             continue
         url = attachment.get("attachment_url")
-        name = attachment.get("name", "attachment")
+        name = re.sub(r"[^\w.\-]", "_", Path(attachment.get("name") or "attachment").name).lstrip(".") or "attachment"
         if not url:
             continue
         try:
@@ -789,6 +814,13 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             print(f"Failed to download attachment {name}: {e}")
 
     for i, url in enumerate(inline_image_urls):
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            continue
+        if parsed.scheme != "https" or parsed.hostname != f"{FRESHDESK_DOMAIN}.freshdesk.com".lower():
+            print(f"Skipping inline image from non-Freshdesk host: {parsed.hostname}")
+            continue
         try:
             img_response = requests.get(url, auth=AUTH, timeout=15)
             img_response.raise_for_status()
@@ -892,7 +924,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     if not pdf_text.strip():
         ticket_dir = ATTACHMENTS_DIR / str(ticket_id)
-        for url in find_download_links(description):
+        for url in find_download_links(description)[:3]:
             linked_text, linked_images = download_linked_document(url, ticket_dir)
             if linked_text:
                 pdf_text += f"\n\n{linked_text}"
