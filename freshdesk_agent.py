@@ -608,19 +608,6 @@ def _parse_model_json(content: str) -> dict | None:
     return None
 
 
-def validate_target_email(target_email: str | None, description: str, pdf_text: str) -> str | None:
-    """Only trust target_email if it actually appears somewhere in the source
-    text - guards against the model inventing/guessing an address rather
-    than reading one. No format validation, since real addresses have too
-    much valid variation to hand-roll a regex for reliably."""
-    if not target_email:
-        return None
-    combined_text = f"{description}\n{pdf_text}"
-    if target_email.strip().lower() not in combined_text.lower():
-        print(f"Rejected target_email (not found in source text): {target_email!r}")
-        return None
-    return target_email.strip()
-
 
 def select_target_email(description: str, pdf_text: str) -> tuple[str | None, list[str]]:
     """Choose the first source email that is not on the forbidden lists,
@@ -750,21 +737,6 @@ def find_name_near_email(text: str, email: str | None) -> str | None:
     match = pattern.search(text)
     return match.group(1).strip() if match else None
 
-
-def normalize_email_value(value) -> str | None:
-    """The model sometimes returns a list of emails instead of a single
-    string, despite the prompt asking for one. Take the first usable one
-    rather than crashing on unexpected shapes."""
-    if value is None:
-        return None
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    return None
 
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
