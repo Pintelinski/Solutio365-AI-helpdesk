@@ -27,7 +27,7 @@ load_dotenv()
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 BASE_URL = (f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2")
-FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD", "X")
+FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
 SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
 SUPPORT_AGENT_INTERCOM_ID = int(os.getenv("SUPPORT_AGENT_INTERCOM_ID"))
@@ -920,7 +920,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     else:
         assign = 2
-    reply_message = f"{ooo_prefix}{decision["reply"]}"
+    reply_message = f"{ooo_prefix}{decision['reply']}"
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
 
