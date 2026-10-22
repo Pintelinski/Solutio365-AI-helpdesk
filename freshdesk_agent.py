@@ -824,7 +824,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             parsed = urlparse(url)
         except ValueError:
             continue
-        if parsed.scheme != "https" or parsed.hostname != f"{FRESHDESK_DOMAIN}.freshdesk.com".lower():
+        if parsed.scheme != "https" or parsed.hostname != f"{FRESHDESK_DOMAIN}.freshdesk.com".lower() or parsed.hostname != "eucattachment.freshdesk.com":
             print(f"Skipping inline image from non-Freshdesk host: {parsed.hostname}")
             continue
         try:
