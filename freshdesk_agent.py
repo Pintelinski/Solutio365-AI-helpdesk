@@ -528,6 +528,13 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     image_analyses = analyze_images(image_paths)
 
+    print(f"DEBUG image paths: {[p.name for p in image_paths]}")
+    print(f"DEBUG image analyses: {image_analyses}")
+    print(
+        "DEBUG router photo detected:",
+        any(a["image_type"] == "router_photo" for a in image_analyses)
+    )
+
     combined_text = f"{description}\n{pdf_text}"
     target_email, CC_emails = select_target_email(description, pdf_text)
     tenant_name = find_name_near_email(combined_text, target_email) or context.get("tenant_name") or requester_name
