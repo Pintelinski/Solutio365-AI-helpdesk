@@ -31,6 +31,7 @@ FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
 SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
 SUPPORT_AGENT_INTERCOM_ID = int(os.getenv("SUPPORT_AGENT_INTERCOM_ID"))
+ALLOWED_INLINE_IMAGE_HOSTS = {f"{FRESHDESK_DOMAIN}.freshdesk.com".lower(), "eucattachment.freshdesk.com",}
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
@@ -822,9 +823,10 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
     for i, url in enumerate(inline_image_urls):
         try:
             parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
         except ValueError:
             continue
-        if parsed.scheme != "https" or parsed.hostname != f"{FRESHDESK_DOMAIN}.freshdesk.com".lower() or parsed.hostname != "eucattachment.freshdesk.com":
+        if parsed.scheme != "https" or host not in ALLOWED_INLINE_IMAGE_HOSTS:
             print(f"Skipping inline image from non-Freshdesk host: {parsed.hostname}")
             continue
         try:
