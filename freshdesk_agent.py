@@ -206,7 +206,7 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> tuple[
         if not url:
             continue
         try:
-            pdf_response = requests.get(url, timeout=15)
+            pdf_response = requests.get(url, auth=AUTH, timeout=15)
             pdf_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / name
@@ -453,17 +453,44 @@ def build_internal_note(analyses: list[dict]) -> str:
 
 
 def detect_reply_language(pdf_context: dict, description: str) -> str:
-    """Deterministically decide reply language from the cleanly-extracted
-    problem description (from the PDF extraction pass, or the main ticket
-    text if there's no PDF) - not left to the final generation step."""
-    text_to_check = (pdf_context.get("problem_description") or description or "").strip()
-    if not text_to_check:
+    extracted = pdf_context.get("problem_description") or ""
+    text = f"{extracted}\n{description or ''}".strip()
+
+    if not text:
         return "English"
+
+    lower_text = text.casefold()
+
+    dutch_markers = (
+        "ik", "mijn", "het", "een", "niet", "geen", "werkt",
+        "probleem", "wifi", "internet", "woning", "adres",
+        "bedankt", "hallo", "slecht", "traag", "verbinding",
+    )
+    english_markers = (
+        "i", "my", "the", "a", "not", "doesn't", "problem",
+        "works", "internet", "home", "address", "thank",
+        "hello", "slow", "connection",
+    )
+
+    dutch_score = sum(
+        1 for marker in dutch_markers
+        if re.search(rf"\b{re.escape(marker)}\b", lower_text)
+    )
+    english_score = sum(
+        1 for marker in english_markers
+        if re.search(rf"\b{re.escape(marker)}\b", lower_text)
+    )
+
+    if dutch_score >= english_score + 2:
+        return "Dutch"
+    if english_score >= dutch_score + 2:
+        return "English"
+
     try:
-        detected = detect(text_to_check)
+        detected = detect(text)
+        return LANGUAGE_MAP.get(detected, "English")
     except Exception:
         return "English"
-    return LANGUAGE_MAP.get(detected, "English")
 
 
 def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
@@ -775,7 +802,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
         if not url:
             continue
         try:
-            img_response = requests.get(url, timeout=15)
+            img_response = requests.get(url, auth=AUTH, timeout=15)
             img_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / name
@@ -924,6 +951,17 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
 
+    image_analyses = decision.get("_image_analyses", [])
+
+    if decision["category"] in {"wifi", "intercom"}:
+        note = build_internal_note(image_analyses)
+        if note:
+            try:
+                add_private_note(ticket_id, note)
+                print(f"Added private router note to ticket {ticket_id}")
+            except requests.exceptions.RequestException as error:
+                print(f"Failed to add private router note: {error}")
+
     if decision["category"] == "tv":
         address = decision.get("_extracted_address")
         name = decision.get("_tenant_name")
@@ -984,14 +1022,6 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
 
-    note = build_internal_note(decision.get("_image_analyses", []))
-    if note:
-        try:
-            add_private_note(ticket_id, note)
-            print(f"Added private note with router details to ticket {ticket_id}")
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to add private note to ticket {ticket_id}: {e}")
-
     cleanup_ticket_files(ticket_id)
 
 
@@ -1001,9 +1031,9 @@ async def receive_ticket(request: Request, background_tasks: BackgroundTasks, au
     print(f"Received webhook payload: {payload}")
 
     ticket_id = payload.get("ticket_id")
-    requester_email = payload.get("requester_email")
-    requester_name = payload.get("requester_name")
-    description = payload.get("description_text")
+    requester_email = payload.get("requester_email") or ""
+    requester_name = payload.get("requester_name") or ""
+    description = payload.get("description_text") or ""
 
     background_tasks.add_task(process_ticket, int(ticket_id), requester_email, requester_name, description)
 
