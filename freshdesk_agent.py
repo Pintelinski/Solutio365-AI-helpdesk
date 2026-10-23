@@ -529,13 +529,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     image_analyses = analyze_images(image_paths)
 
-    print(f"DEBUG image paths: {[p.name for p in image_paths]}")
-    print(f"DEBUG image analyses: {image_analyses}")
-    print(
-        "DEBUG router photo detected:",
-        any(a["image_type"] == "router_photo" for a in image_analyses)
-    )
-
     combined_text = f"{description}\n{pdf_text}"
     target_email, CC_emails = select_target_email(description, pdf_text)
     tenant_name = find_name_near_email(combined_text, target_email) or context.get("tenant_name") or requester_name
@@ -582,8 +575,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n\n{relevant_issues}"
 
     message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
-
-    print(message_text)
 
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
