@@ -940,14 +940,16 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         return
 
     reply_language = decision.get("_reply_language", "English")
-    ooo_prefix = f"{OUT_OF_OFFICE_TEXT[reply_language]}\n\n" if is_out_of_office() else ""
+    ooo_prefix = is_out_of_office()
 
     if ticket_id % 2 == 0:
         assign = 1
 
     else:
         assign = 2
-    reply_message = f"{ooo_prefix}{decision['reply']}"
+    reply_message = f"{greeting}\n\n{body}\n\n{closing}"
+    if ooo_prefix:
+        reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
 
@@ -995,7 +997,9 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             else:
                 body = templates[system][reply_language]
 
-        reply_message = f"{ooo_prefix}{greeting}\n\n{body}\n\n{closing}"
+        reply_message = f"{greeting}\n\n{body}\n\n{closing}"
+        if ooo_prefix:
+            reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
         attach = manual_path if address and system else None
         reply_to_ticket(ticket_id, reply_message, assign=1, target_email=decision.get("_target_email"), attachment_path=attach)
         print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
