@@ -105,7 +105,8 @@ OUT_OF_OFFICE_TEXT = {
 }
 
 STREET_ADDRESS_PATTERN = re.compile(
-    r"\b((?:[A-Z][a-zà-ÿ]+\s+(?!(?i:van|der|den|ter|ten)\s))?"
+    r"\b((?:(?!(?i:de|het|een|op|aan|in|naar|bij|uit|door|en|is|mijn|ons|onze|zijn|voor|met|die|dat|deze|ik|woon|wonen|wij)\s)"
+    r"[A-Za-zÀ-ÿ'\-]+\s+)?"
     r"(?:(?i:van|der|den|ter|ten)\s+)*"
     r"[A-Za-zÀ-ÿ'\-]*(?i:straat|laan|weg|plein|gracht|singel|dijk|kade|pad|hof|dreef|steeg|boulevard|park|plantsoen|kanaal|baan|erf))"
     r"\s+(\d{1,4}[A-Za-z]?(?:[-/]\d{1,3})?)\b"
