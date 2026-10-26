@@ -217,6 +217,9 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> tuple[
         try:
             pdf_response = requests.get(url, auth=AUTH, timeout=15)
             pdf_response.raise_for_status()
+            if int(attachment.get("size") or 0) > MAX_DOWNLOAD_BYTES:
+                print(f"Skipping attachment {name}: too large")
+                continue
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / name
             file_path.write_bytes(pdf_response.content)
@@ -584,8 +587,6 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n\n{relevant_issues}"
 
     message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
-
-    print(message_text)
 
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
@@ -956,7 +957,6 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     print(f"Ticket {ticket_id}: {len(image_paths)} image(s) total in {ATTACHMENTS_DIR / str(ticket_id)}")
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
-    print(decision)
 
     if decision["category"] == "ignore":
         print(f"Ticket {ticket_id}: classified as ignore, no reply or assignment.")
