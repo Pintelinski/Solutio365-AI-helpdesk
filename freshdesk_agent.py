@@ -944,15 +944,11 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     if ticket_id % 2 == 0:
         assign = 1
-
     else:
         assign = 2
-    reply_message = f"{greeting}\n\n{body}\n\n{closing}"
-    if ooo_prefix:
-        reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
+
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
-
     image_analyses = decision.get("_image_analyses", [])
 
     if decision["category"] in {"wifi", "intercom"}:
@@ -971,6 +967,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         closing = "Met vriendelijke groet,\nSupport team Solutio365" if reply_language == "Dutch" else "Greetings,\nSupport team Solutio365"
         templates = json.loads(TV_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
+        system, manual_path = (None, None)
         if not address:
             body = templates["need_address"][reply_language]
         else:
@@ -1005,6 +1002,10 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
         cleanup_ticket_files(ticket_id)
         return
+
+    reply_message = decision["reply"]
+    if ooo_prefix:
+        reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
 
     if decision["category"] == "wifi":
         tip = get_router_tip(decision.get("_image_analyses", []), decision.get("_reply_language", "English"))
