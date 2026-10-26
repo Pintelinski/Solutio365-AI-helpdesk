@@ -998,7 +998,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         if ooo_prefix:
             reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
         attach = manual_path if address and system else None
-        reply_to_ticket(ticket_id, reply_message, assign=1, target_email=decision.get("_target_email"), attachment_path=attach)
+        reply_to_ticket(ticket_id, reply_message, assign=1, target_email=target_email, attachment_path=attach)
         print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
         cleanup_ticket_files(ticket_id)
         return
