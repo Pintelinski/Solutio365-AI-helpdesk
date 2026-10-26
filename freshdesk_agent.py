@@ -708,10 +708,16 @@ def is_non_configurable_intercom(address: str | None) -> bool:
     except FileNotFoundError:
         return False
 
-    normalized_ticket_address = normalize_address(address)
+    ticket_key = find_address_in_text(address)
     for known in known_addresses:
-        normalized_known = normalize_address(known)
-        if normalized_known in normalized_ticket_address or normalized_ticket_address in normalized_known:
+        known_key = find_address_in_text(known)
+        if ticket_key and known_key:
+            # Compare street plus house number, so "763" never matches "76" or "7630".
+            # Any city name after the number is ignored.
+            if normalize_address(ticket_key) == normalize_address(known_key):
+                return True
+        elif normalize_address(known) in normalize_address(address):
+            # Entries without a recognised street suffix fall back to the old check.
             return True
     return False
 
