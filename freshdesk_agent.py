@@ -104,6 +104,13 @@ OUT_OF_OFFICE_TEXT = {
     "Dutch": "Bedankt voor uw ticket. Ons supportteam is momenteel niet aanwezig. Wij zijn bereikbaar van maandag tot en met vrijdag van 08:00 tot 17:00 uur. We bekijken uw ticket zodra we weer aanwezig zijn.",
 }
 
+STREET_ADDRESS_PATTERN = re.compile(
+    r"\b((?:[A-Z][a-zà-ÿ]+\s+(?!(?i:van|der|den|ter|ten)\s))?"
+    r"(?:(?i:van|der|den|ter|ten)\s+)*"
+    r"[A-Za-zÀ-ÿ'\-]*(?i:straat|laan|weg|plein|gracht|singel|dijk|kade|pad|hof|dreef|steeg|boulevard|park|plantsoen|kanaal|baan|erf))"
+    r"\s+(\d{1,4}[A-Za-z]?(?:[-/]\d{1,3})?)\b"
+)
+
 # --- TESTING OVERRIDE: remove this line before going live ---
 TEST_EMAIL_OVERRIDE = os.getenv("TEST_EMAIL_OVERRIDE")  # forces all outgoing mail to this address for testing
 # ---------------------------------------------------------------
@@ -526,6 +533,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     source_text = pdf_text if pdf_text.strip() else description
     context = extract_ticket_context(source_text)
     reply_language = detect_reply_language(context, description)
+    location = context.get("location") or find_address_in_text(f"{description}\n{pdf_text}")
 
     image_analyses = analyze_images(image_paths)
 
@@ -548,8 +556,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     if context.get("problem_description"):
         message_text += f"\n\n[Extracted problem description (use this, not the raw text above, as the tenant's actual issue): {context['problem_description']}]"
-    if context.get("location"):
-        message_text += f"\n[Extracted address/location: {context['location']}]"
+    if location:
+        message_text += f"\n[Extracted address/location: {location}]"
     else:
         missing_info.append("address/location")
     if context.get("permission_to_enter") and pdf_text.strip():
@@ -604,7 +612,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         result["missing_info"] = []
 
     result["_target_email"] = target_email
-    result["_extracted_address"] = context.get("location")
+    result["_extracted_address"] = location
     result["_CC_emails"] = CC_emails
     result["_image_analyses"] = image_analyses
     result["_reply_language"] = reply_language
@@ -678,6 +686,13 @@ def normalize_address(address: str) -> str:
     normalized = re.sub(r"[^\w\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
+
+
+def find_address_in_text(text: str) -> str | None:
+    """Deterministic fallback for when the extraction model misses the address.
+    Returns the street and house number as written, or None."""
+    match = STREET_ADDRESS_PATTERN.search(text or "")
+    return f"{match.group(1)} {match.group(2)}" if match else None
 
 
 def is_non_configurable_intercom(address: str | None) -> bool:
