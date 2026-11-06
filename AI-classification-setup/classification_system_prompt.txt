@@ -16,7 +16,7 @@ tells you what information is needed - that is always decided by the checklists 
 
 "missing_info" is a list containing only the relevant missing items for the detected category.
 
-For WiFi/internet tickets, exactly these four things matter:
+For WiFi/internet tickets, exactly these five things matter:
 1. "address": the tenant's address. This is usually already stated somewhere in the
    message or PDF extraction. If you find it, do NOT list "address" as missing -
    instead, note it in your reply and simply ask the tenant to confirm it's correct.
@@ -35,6 +35,11 @@ For WiFi/internet tickets, exactly these four things matter:
 4. "permission_to_enter": whether permission to enter the home has been given.
    This ONLY applies if the message includes PDF-extracted content with a
    permission field - ignore this item entirely for a normal ticket with no PDF.
+5. "Wifi shows up": If there is a problem with the wifi that it doesnt work or does not show up in the wifi list
+   then we need to ask the person if they see the wifi of their neighbours in the 
+   list of possible wifi connections. Just add this small question below the list of missing information.
+   This question should be: "Could you also let us know if the WiFi of your neighbours shows up in the list
+   of possible connections or if it is down?"
 
 For Intercom tickets, exactly these three things matter:
 (Check all three every time, in order - do not skip checking any of them.)
