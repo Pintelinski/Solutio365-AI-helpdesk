@@ -38,9 +38,9 @@ ALLOWED_INLINE_IMAGE_HOSTS = {
     "solutio365.nl",
     "www.solutio365.nl",
     "codomo.eu",
-    "magisrealestate.com"
-    "holland2stay.com"
-}
+    "magisrealestate.com",
+    "holland2stay.com",
+ }
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
@@ -816,23 +816,43 @@ def find_name_near_email(text: str, email: str | None) -> str | None:
 
 
 def get_ticket_attachments(ticket_id: int) -> tuple[list[dict], list[str]]:
-    """Fetch the full ticket from Freshdesk and return both:
-    - traditional file attachments (from the 'attachments' field)
-    - inline image URLs pasted directly into the email body (Freshdesk embeds
-      these as <img> tags in the HTML 'description' field, not in
-      'attachments' - this is the common case for copy-pasted screenshots).
-    """
-    response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
-    response.raise_for_status()
-    ticket = response.json()
+     """Fetch the full ticket from Freshdesk and return both:
+     - traditional file attachments (from the 'attachments' field)
+     - inline image URLs pasted directly into the email body (Freshdesk embeds
+       these as <img> tags in the HTML 'description' field, not in
+       'attachments' - this is the common case for copy-pasted screenshots).
+     """
+     response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
+     response.raise_for_status()
+     ticket = response.json()
 
-    attachments = ticket.get("attachments", [])
+     attachments = list(ticket.get("attachments", []) or [])
 
-    description_html = ticket.get("description", "") or ""
-    inline_image_urls = re.findall(r'<img[^>]+src="([^"]+)"', description_html)
+     html_bodies = [ticket.get("description", "") or ""]
 
-    print(f"Ticket {ticket_id}: {len(attachments)} file attachment(s), {len(inline_image_urls)} inline image(s) in body")
-    return attachments, inline_image_urls
+     conversations_response = requests.get(
+         f"{BASE_URL}/tickets/{ticket_id}/conversations",
+         auth=AUTH,
+         timeout=15,
+     )
+     conversations_response.raise_for_status()
+     for conversation in conversations_response.json():
+         if conversation.get("private"):
+             continue
+         html_bodies.append(conversation.get("body") or "")
+         attachments.extend(conversation.get("attachments", []) or [])
+
+     inline_image_urls = []
+     seen_urls = set()
+     for html_body in html_bodies:
+         for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', unescape(html_body), flags=re.I):
+             url = unescape(url).strip()
+             if url and url not in seen_urls:
+                 seen_urls.add(url)
+                 inline_image_urls.append(url)
+
+     print(f"Ticket {ticket_id}: {len(attachments)} file attachment(s), {len(inline_image_urls)} inline image(s) in body")
+     return attachments, inline_image_urls
 
 
 def download_image_attachments(ticket_id: int, attachments: list[dict], inline_image_urls: list[str]) -> list[Path]:
@@ -904,10 +924,7 @@ def add_private_note(ticket_id: int, note_html: str) -> None:
 
 
 def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email: str | None, special_agent: int | None = None, CC_emails: list[str] | None = None, attachment_path: Path | None = None) -> dict:
-    """POST a public reply to a Freshdesk ticket - this is what emails the requester."""
-    if not BASE_URL or not FRESHDESK_API_KEY:
-        raise RuntimeError("FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be configured")
-
+    """POST a public reply and assign by the caller's explicit routing value."""
     message_text = message_html.replace("\n", "<br>")
 
     if attachment_path and attachment_path.exists():
@@ -920,8 +937,7 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
                 timeout=30,
             )
         response.raise_for_status()
-        responder_id = special_agent if special_agent else (SUPPORT_AGENT_ID if assign == 1 else SUPPORT_EMPLOYEE_ID)
-        assign_response = requests.put(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, json={"responder_id": responder_id}, timeout=15)
+        assign_response = requests.put(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, json={"responder_id": assign}, timeout=15)
         assign_response.raise_for_status()
         return {"reply": response.json(), "assign": assign_response.json()}
 
@@ -949,11 +965,10 @@ def reply_to_ticket(ticket_id: int, message_html: str, assign: int, target_email
         )
     response.raise_for_status()
 
-    responder_id = special_agent if special_agent else (SUPPORT_EMPLOYEE_ID if assign == 1 else SUPPORT_AGENT_ID)
     assign_response = requests.put(
         f"{BASE_URL}/tickets/{ticket_id}",
         auth=AUTH,
-        json={"responder_id": responder_id},
+        json={"responder_id": assign},
         timeout=15,
     )
     assign_response.raise_for_status()
@@ -965,6 +980,10 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     """Runs the slow AI classification + Freshdesk reply after the webhook
     has already been acknowledged, so Freshdesk/the sender never times out
     waiting on the model."""
+    full_description = get_full_ticket_context(ticket_id, description)
+    if full_description:
+        description = full_description
+
     attachments, inline_image_urls = get_ticket_attachments(ticket_id)
     image_paths = download_image_attachments(ticket_id, attachments, inline_image_urls)
 
@@ -991,10 +1010,12 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
     reply_language = decision.get("_reply_language", "English")
     ooo_prefix = is_out_of_office()
 
-    if ticket_id % 2 == 0:
-        assign = 1
-    else:
-        assign = 2
+    missing_info = decision.get("missing_info", [])
+    if not isinstance(missing_info, list):
+        missing_info = []
+    assign = SUPPORT_AGENT_INTERCOM_ID if missing_info else SUPPORT_EMPLOYEE_ID
+    routing_reason = "missing information" if missing_info else "all required information provided"
+    print(f"Ticket {ticket_id}: routing to responder {assign} ({routing_reason})")
 
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
@@ -1047,9 +1068,12 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
         if ooo_prefix:
             reply_message = insert_tip_before_closing(reply_message, OUT_OF_OFFICE_TEXT[reply_language])
         attach = manual_path if address and system else None
-        reply_to_ticket(ticket_id, reply_message, assign=1, target_email=target_email, attachment_path=attach)
+        reply_to_ticket(ticket_id, reply_message, assign=assign, target_email=target_email, attachment_path=attach)
         print(f"Ticket {ticket_id}: TV ticket handled ({'manual sent: ' + system if address and system else 'asked for/re-asked address'}).")
-        cleanup_ticket_files(ticket_id)
+        if not missing_info:
+            cleanup_ticket_files(ticket_id)
+        else:
+            print(f"Ticket {ticket_id}: keeping attachment folder until missing information is provided.")
         return
 
     reply_message = decision["reply"]
@@ -1062,21 +1086,17 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
             reply_message = insert_tip_before_closing(reply_message, tip)
             print(f"Added router troubleshooting tip to ticket {ticket_id}")
 
-    special_agent = None
-    if decision["category"] == "intercom":
-        address = decision.get("_extracted_address")
-        if is_non_configurable_intercom(address):
-            special_agent = SUPPORT_AGENT_INTERCOM_ID
-            print(f"Ticket {ticket_id}: address matches non-configurable intercom list, routing to special agent")
-
     try:
-        reply_to_ticket(ticket_id, reply_message, assign, target_email, special_agent, CC_emails)
-        target = "intercom agent" if special_agent else "human employee"
+        reply_to_ticket(ticket_id, reply_message, assign, target_email, None, CC_emails)
+        target = "intercom collection agent" if missing_info else "support employee"
         print(f"Replied to ticket {ticket_id} (requester: {requester_email}) and assigned it to the {target}.")
     except requests.exceptions.HTTPError as e:
         print(f"Failed to reply to ticket {ticket_id}: {e.response.text}")
 
-    cleanup_ticket_files(ticket_id)
+    if missing_info:
+        print(f"Ticket {ticket_id}: keeping attachment folder until missing information is provided.")
+    else:
+        cleanup_ticket_files(ticket_id)
 
 
 @app.post("/freshdesk-webhook", status_code=202)
@@ -1092,3 +1112,53 @@ async def receive_ticket(request: Request, background_tasks: BackgroundTasks, au
     background_tasks.add_task(process_ticket, int(ticket_id), requester_email, requester_name, description)
 
     return {"status": "accepted", "ticket_id": int(ticket_id)}
+
+def get_full_ticket_context(ticket_id: int, webhook_description: str) -> str:
+    """Combine the original ticket and public replies for reprocessing after a customer reply."""
+    context_parts = []
+
+    if webhook_description:
+        context_parts.append(webhook_description.strip())
+
+    try:
+        ticket_response = requests.get(f"{BASE_URL}/tickets/{ticket_id}", auth=AUTH, timeout=15)
+        ticket_response.raise_for_status()
+        ticket = ticket_response.json()
+
+        description_html = ticket.get("description") or ""
+        if description_html:
+            description_text = re.sub(r"<br\s*/?>", "\n", description_html, flags=re.I)
+            description_text = re.sub(r"</p>", "\n", description_text, flags=re.I)
+            description_text = unescape(re.sub(r"<[^>]+>", "", description_text)).strip()
+            if description_text:
+                context_parts.insert(0, description_text)
+
+        conversations_response = requests.get(
+            f"{BASE_URL}/tickets/{ticket_id}/conversations",
+            auth=AUTH,
+            timeout=15,
+        )
+        conversations_response.raise_for_status()
+        for conversation in conversations_response.json():
+            if conversation.get("private"):
+                continue
+            body = conversation.get("body_text") or conversation.get("body") or ""
+            if "<" in body:
+                body = re.sub(r"<br\s*/?>", "\n", body, flags=re.I)
+                body = re.sub(r"</p>", "\n", body, flags=re.I)
+                body = unescape(re.sub(r"<[^>]+>", "", body)).strip()
+            else:
+                body = unescape(body).strip()
+            if body:
+                context_parts.append(body)
+    except requests.exceptions.RequestException as error:
+        print(f"Failed to fetch full ticket context for {ticket_id}: {error}")
+
+    unique_parts = []
+    seen = set()
+    for part in context_parts:
+        normalized = re.sub(r"\s+", " ", part).strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            unique_parts.append(part)
+    return "\n\n".join(unique_parts)
