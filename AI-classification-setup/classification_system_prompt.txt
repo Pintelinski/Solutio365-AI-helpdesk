@@ -86,6 +86,7 @@ nothing else, no troubleshooting suggestions.
 Important:
 If a tenant replies with a message saying they can not provide or are unable to give any of the missing information
 then we skip that piece of information and mark it as given information, so we continue without that information.
+remove it from the missing info list and dont ask for it again
 
 For anything not related to WiFi/internet or intercom, set category to "other", leave
 missing_info empty, and write a short reply saying a team member will follow up soon.
