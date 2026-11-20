@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from contextlib import asynccontextmanager
+from html import unescape
 
 from langdetect import detect, DetectorFactory
 import requests
@@ -31,7 +32,15 @@ FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
 SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
 SUPPORT_AGENT_INTERCOM_ID = int(os.getenv("SUPPORT_AGENT_INTERCOM_ID"))
-ALLOWED_INLINE_IMAGE_HOSTS = {f"{FRESHDESK_DOMAIN}.freshdesk.com".lower(), "eucattachment.freshdesk.com",}
+ALLOWED_INLINE_IMAGE_HOSTS = {
+    f"{FRESHDESK_DOMAIN}.freshdesk.com".lower(),
+    "eucattachment.freshdesk.com",
+    "solutio365.nl",
+    "www.solutio365.nl",
+    "codomo.eu",
+    "magisrealestate.com"
+    "holland2stay.com"
+}
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
@@ -215,10 +224,21 @@ def download_and_extract_pdfs(ticket_id: int, attachments: list[dict]) -> tuple[
         if not url:
             continue
         try:
-            pdf_response = requests.get(url, auth=AUTH, timeout=15)
+            request_headers = {
+                "Accept": "application/pdf,*/*",
+                "User-Agent": "Solutio365-AI-Helpdesk/1.0",
+            }
+            pdf_response = requests.get(url, auth=AUTH, headers=request_headers, timeout=15)
+            if pdf_response.status_code in (400, 401, 403):
+                # Some attachment URLs are signed/download URLs that reject Basic Auth.
+                pdf_response = requests.get(url, headers=request_headers, timeout=15)
             pdf_response.raise_for_status()
-            if int(attachment.get("size") or 0) > MAX_DOWNLOAD_BYTES:
+            if len(pdf_response.content) > MAX_DOWNLOAD_BYTES:
                 print(f"Skipping attachment {name}: too large")
+                continue
+            if not pdf_response.content.startswith(b"%PDF-"):
+                preview = pdf_response.content[:200].decode("utf-8", errors="replace").replace("\n", " ")
+                print(f"Skipping attachment {name}: downloaded content is not a PDF ({pdf_response.status_code}; {preview})")
                 continue
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / name
@@ -241,7 +261,12 @@ def find_download_links(text: str) -> list[str]:
     download link to an external document instead of a real attachment."""
     if not text:
         return []
-    return URL_PATTERN.findall(text)
+    links = []
+    for raw_url in URL_PATTERN.findall(unescape(text)):
+        url = raw_url.rstrip(".,;:!?)]}")
+        if url not in links:
+            links.append(url)
+    return links
 
 
 def fetch_public_url(url: str, max_redirects: int = 5) -> requests.Response | None:
@@ -846,7 +871,7 @@ def download_image_attachments(ticket_id: int, attachments: list[dict], inline_i
             print(f"Skipping inline image from non-Freshdesk host: {parsed.hostname}")
             continue
         try:
-            img_response = requests.get(url, auth=AUTH, timeout=15)
+            img_response = requests.get(url, timeout=15)
             img_response.raise_for_status()
             ticket_dir.mkdir(parents=True, exist_ok=True)
             file_path = ticket_dir / f"inline_{i}.png"
