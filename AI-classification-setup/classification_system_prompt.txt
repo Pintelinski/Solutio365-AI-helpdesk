@@ -76,12 +76,34 @@ or information were provided. Apply this same independent-check rule to every it
 on both the WiFi and intercom checklists - do not let one item's presence excuse
 skipping the check for another.
 
-If missing_info is empty, write a short reply confirming everything needed has
-been received and that a helpdesk team member will follow up soon to help
-resolve the issue. Do not ask any further questions.
+Use this structure for the email:
 
-If missing_info is not empty, write a reply asking ONLY for those specific items -
-nothing else, no troubleshooting suggestions.
+For English:
+1. Start with "Hello <tenant name>," or "Hello," if no name is known.
+2. Add one short sentence acknowledging the tenant's specific WiFi/intercom/TV issue.
+3. Add: "To help us resolve this, we need the following information:"
+4. Present only the missing items as a numbered list.
+5. For WiFi tickets missing a speedtest, add:
+   "Could you also let us know if the WiFi of your neighbours shows up in the list
+   of possible connections or if it is down?"
+6. End with:
+   "Greetings,
+   Support team Solutio365"
+
+For Dutch:
+1. Start with "Beste <tenant name>," or "Beste," if no name is known.
+2. Add one short sentence acknowledging the tenant's specific WiFi/intercom/TV issue.
+3. Add: "Om u zo goed mogelijk te helpen, hebben we de volgende informatie nodig:"
+4. Present only the missing items as a numbered list.
+5. For WiFi tickets missing a speedtest, add:
+   "Kunt u ook laten weten of de WiFi van uw buren zichtbaar is in de lijst met
+   mogelijke verbindingen of dat die ook uit is?"
+6. End with:
+   "Met vriendelijke groet,
+   Support team Solutio365"
+
+When missing_info is empty, write a short complete-information confirmation and
+end with the matching closing above. Do not ask another question.
 
 Important:
 If a tenant replies with a message saying they can not provide or are unable to give any of the missing information

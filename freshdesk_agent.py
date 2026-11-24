@@ -411,12 +411,19 @@ def clean_image_analysis(analysis: dict) -> dict:
     return cleaned
 
 
-def analyze_images(image_paths: list[Path]) -> list[dict]:
-    """Classify each image (router photo / speedtest / other) and read router
-    identifiers off router photos. One image per call - small vision models
-    mix things up when given several at once."""
+def analyze_images(image_paths: list[Path], ticket_id: int | None = None) -> list[dict]:
+    """Classify each image, using cached results for a ticket where available."""
+    state = load_ticket_state(ticket_id) if ticket_id is not None else {"image_analyses": {}}
+    cached = state.setdefault("image_analyses", {})
     analyses = []
     for path in image_paths[:MAX_IMAGES_TO_ANALYZE]:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest in cached:
+            analysis = cached[digest]
+            analysis["file"] = path.name
+            print(f"Using cached image analysis for {path.name}: {analysis}")
+            analyses.append(analysis)
+            continue
         try:
             response = ollama_client.chat(
                 model=OLLAMA_MODEL,
@@ -436,7 +443,12 @@ def analyze_images(image_paths: list[Path]) -> list[dict]:
         raw["file"] = path.name
         analysis = clean_image_analysis(raw)
         print(f"Image analysis for {path.name}: {analysis}")
+        if ticket_id is not None:
+            cached[digest] = analysis
         analyses.append(analysis)
+
+    if ticket_id is not None:
+        save_ticket_state(ticket_id, state)
 
     return analyses
 
@@ -550,7 +562,7 @@ def retrieve_relevant_issues(description: str, n_results: int = 2) -> str:
     return "Relevant known issues (for reference, use your judgment):\n" + "\n".join(blocks)
 
 
-def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "", requester_name: str | None = None) -> dict:
+def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text: str = "", requester_name: str | None = None, ticket_id: int | None = None) -> dict:
     """Classify the ticket and draft a reply. Images are analyzed in their own
     focused pass first; the final call only sees short text notes about them,
     so it stays text-only (faster, and it can't hallucinate about images)."""
@@ -564,7 +576,7 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     reply_language = detect_reply_language(context, description)
     location = context.get("location") or find_address_in_text(f"{description}\n{pdf_text}")
 
-    image_analyses = analyze_images(image_paths)
+    image_analyses = analyze_images(image_paths, ticket_id)
 
     combined_text = f"{description}\n{pdf_text}"
     target_email, CC_emails = select_target_email(description, pdf_text)
@@ -577,41 +589,27 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
 
     missing_info = []
     message_text = f"{description}\n\n{format_image_notes(image_analyses, len(image_paths))}"
-    if not any(a["image_type"] == "speedtest" for a in image_analyses):
-        missing_info.append("speedtest screenshot")
-
-    if not any(a["image_type"] == "router_photo" for a in image_analyses):
-        missing_info.append("router photo")
-
     if context.get("problem_description"):
         message_text += f"\n\n[Extracted problem description (use this, not the raw text above, as the tenant's actual issue): {context['problem_description']}]"
     if location:
         message_text += f"\n[Extracted address/location: {location}]"
-    else:
-        missing_info.append("address/location")
     if context.get("permission_to_enter") and pdf_text.strip():
         message_text += f"\n[Extracted permission to enter home: {context['permission_to_enter']}]"
-    else:
-        missing_info.append("permission to enter home")
     if tenant_name:
         message_text += f"\n\n[Tenant name: {tenant_name}]"
-    else:
-        missing_info.append("tenant name")
     if full_name:
         message_text += f"\n[Extracted tenant full name (for intercom tickets): {full_name}]"
-    else:
-        missing_info.append("tenant full name")
     if context.get("phone_number"):
         message_text += f"\n[Extracted phone number: {context['phone_number']}]"
-    else:
-        missing_info.append("phone number")
 
     message_text += f"\n\n[REQUIRED REPLY LANGUAGE: {reply_language}. This has already been determined for you - write your entire reply in {reply_language}, regardless of any other language appearing elsewhere in this message.]"
 
     if relevant_issues:
         message_text += f"\n\n{relevant_issues}"
 
-    message_text += f"\n\n[Missing information. Check what is needed for what category of tickets: {', '.join(missing_info) if missing_info else 'none'}]"
+    unable_items = load_ticket_state(ticket_id).get("unable_to_provide", []) if ticket_id is not None else []
+    if unable_items:
+        message_text += f"\n\n[Customer was previously unable to provide these items; do not ask for them again: {', '.join(unable_items)}]"
 
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
@@ -638,12 +636,59 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     if not isinstance(result.get("missing_info"), list):
         result["missing_info"] = []
 
-    result["_target_email"] = target_email
-    result["_extracted_address"] = location
-    result["_CC_emails"] = CC_emails
-    result["_image_analyses"] = image_analyses
-    result["_reply_language"] = reply_language
-    result["_tenant_name"] = tenant_name
+    state = load_ticket_state(ticket_id) if ticket_id is not None else {"unable_to_provide": []}
+    unable_items = set(state.setdefault("unable_to_provide", []))
+    unable_items.update(detect_unable_items(description))
+    state["unable_to_provide"] = sorted(unable_items)
+
+    category = result.get("category")
+    provided_items = set()
+    if location:
+        provided_items.add("address/location")
+    if any(a["image_type"] == "router_photo" for a in image_analyses):
+        provided_items.add("router photo")
+    if any(a["image_type"] == "speedtest" for a in image_analyses):
+        provided_items.add("speedtest screenshot")
+    if full_name:
+        provided_items.add("tenant full name")
+    if context.get("phone_number"):
+        provided_items.add("phone number")
+
+    provided_items.update(unable_items)
+
+    if category == "wifi":
+        required_items = {"address/location", "router photo", "speedtest screenshot"}
+    elif category == "intercom":
+        required_items = {"address/location", "tenant full name", "phone number"}
+    elif category == "tv":
+        required_items = {"address/location"}
+    else:
+        required_items = set()
+
+    deterministic_missing = sorted(required_items - provided_items)
+    result["missing_info"] = deterministic_missing
+    if ticket_id is not None:
+        save_ticket_state(ticket_id, state)
+
+    if deterministic_missing:
+        message_text_for_reply = "The following items are the ONLY items that may be requested: " + ", ".join(deterministic_missing)
+        try:
+            followup = ollama_client.chat(
+                model=OLLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"{message_text}\n\n[{message_text_for_reply}]"},
+                ],
+                format="json",
+                think=False,
+                options={"num_ctx": 16384, "temperature": 0.1, "num_thread": 6},
+            )
+            followup_result = _parse_model_json(followup.message.content)
+            if followup_result and isinstance(followup_result.get("reply"), str):
+                result["reply"] = followup_result["reply"]
+        except Exception as error:
+            print(f"Failed to format final missing-information reply: {error}")
+
     return result
 
 
@@ -1000,7 +1045,7 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     print(f"Ticket {ticket_id}: {len(image_paths)} image(s) total in {ATTACHMENTS_DIR / str(ticket_id)}")
 
-    decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name)
+    decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name, ticket_id)
 
     if decision["category"] == "ignore":
         print(f"Ticket {ticket_id}: classified as ignore, no reply or assignment.")
@@ -1162,3 +1207,60 @@ def get_full_ticket_context(ticket_id: int, webhook_description: str) -> str:
             seen.add(normalized)
             unique_parts.append(part)
     return "\n\n".join(unique_parts)
+
+def ticket_state_path(ticket_id: int) -> Path:
+    return ATTACHMENTS_DIR / str(ticket_id) / "ticket_state.json"
+
+
+def load_ticket_state(ticket_id: int) -> dict:
+    try:
+        path = ticket_state_path(ticket_id)
+        if path.exists():
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(state, dict):
+                return state
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as error:
+        print(f"Could not load ticket state for {ticket_id}: {error}")
+    return {"unable_to_provide": [], "image_analyses": {}}
+
+
+def save_ticket_state(ticket_id: int, state: dict) -> None:
+    path = ticket_state_path(ticket_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(".tmp")
+    temporary_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary_path, path)
+
+
+def detect_unable_items(text: str) -> set[str]:
+    text = (text or "").lower()
+    unable = set()
+
+    patterns = {
+        "speedtest screenshot": (
+            r"(?:cannot|can't|cant|unable to|no way to|can't give|cant give|cannot give|can't provide|cannot provide).*(?:speedtest)",
+            r"(?:no|without|don't have|do not have|don't posses|doesn't have|cannot have|can't have).*(?:speedtest)",
+            r"(?:geen|kan geen|niet in staat).*(?:speedtest)",
+        ),
+        "router photo": (
+            r"(?:cannot|can't|cant|unable to|no way to|can't give|cant give|cannot give|can't provide|cannot provide).*(?:router photo|photo of the router|picture of the router)",
+            r"(?:geen|kan geen|niet in staat).*(?:routerfoto|foto van de router)",
+        ),
+        "address/location": (
+            r"(?:cannot|can't|cant|unable to|no way to).*(?:address|location)",
+            r"(?:geen|kan geen|niet in staat).*(?:adres)",
+        ),
+        "tenant full name": (
+            r"(?:cannot|can't|cant|unable to|no way to).*(?:full name|name and surname|first and last name)",
+            r"(?:geen|kan geen|niet in staat).*(?:volledige naam)",
+        ),
+        "phone number": (
+            r"(?:cannot|can't|cant|unable to|no way to).*(?:phone|telephone|mobile)",
+            r"(?:geen|kan geen|niet in staat).*(?:telefoonnummer|telefoon)",
+        ),
+    }
+
+    for item, expressions in patterns.items():
+        if any(re.search(pattern, text, re.I) for pattern in expressions):
+            unable.add(item)
+    return unable
