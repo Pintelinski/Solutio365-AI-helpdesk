@@ -682,8 +682,17 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     message_text_for_reply = (
         "Only ask for these still-missing items: " + ", ".join(deterministic_missing)
         if deterministic_missing
-        else "No information is missing. Do not ask the customer any questions; confirm receipt and say the helpdesk will follow up."
+        else "No required information remains outstanding. Do not ask any questions. Confirm that all required information has been received, including anything the customer said they cannot provide. Then, if the ticket contains reliable router identification or other relevant evidence, offer one concise and safe troubleshooting step grounded in that evidence. Do not invent model-specific instructions or repeat a generic issue acknowledgement. Otherwise say the helpdesk will follow up."
     )
+    router_details = [
+        f"{analysis.get('router_brand') or ''} {analysis.get('router_model') or ''}".strip()
+        for analysis in image_analyses
+        if analysis.get("image_type") == "router_photo"
+        and (analysis.get("router_brand") or analysis.get("router_model"))
+    ]
+    if router_details:
+        message_text_for_reply += " Identified router information: " + ", ".join(router_details) + "."
+
     try:
         followup = ollama_client.chat(
             model=OLLAMA_MODEL,
