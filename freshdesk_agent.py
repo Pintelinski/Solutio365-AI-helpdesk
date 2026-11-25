@@ -608,6 +608,13 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
         message_text += f"\n\n{relevant_issues}"
 
     unable_items = load_ticket_state(ticket_id).get("unable_to_provide", []) if ticket_id is not None else []
+    state = load_ticket_state(ticket_id) if ticket_id is not None else {"unable_to_provide": []}
+    unable_items = set(state.setdefault("unable_to_provide", []))
+    unable_items.update(detect_unable_items(description))
+    state["unable_to_provide"] = sorted(unable_items)
+    if ticket_id is not None:
+        save_ticket_state(ticket_id, state)
+
     if unable_items:
         message_text += f"\n\n[Customer was previously unable to provide these items; do not ask for them again: {', '.join(unable_items)}]"
 
@@ -640,6 +647,8 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     unable_items = set(state.setdefault("unable_to_provide", []))
     unable_items.update(detect_unable_items(description))
     state["unable_to_provide"] = sorted(unable_items)
+    if ticket_id is not None:
+        save_ticket_state(ticket_id, state)
 
     category = result.get("category")
     provided_items = set()
@@ -670,24 +679,27 @@ def classify_and_draft_reply(description: str, image_paths: list[Path], pdf_text
     if ticket_id is not None:
         save_ticket_state(ticket_id, state)
 
-    if deterministic_missing:
-        message_text_for_reply = "The following items are the ONLY items that may be requested: " + ", ".join(deterministic_missing)
-        try:
-            followup = ollama_client.chat(
-                model=OLLAMA_MODEL,
-                messages=[
-                    {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"{message_text}\n\n[{message_text_for_reply}]"},
-                ],
-                format="json",
-                think=False,
-                options={"num_ctx": 16384, "temperature": 0.1, "num_thread": 6},
-            )
-            followup_result = _parse_model_json(followup.message.content)
-            if followup_result and isinstance(followup_result.get("reply"), str):
-                result["reply"] = followup_result["reply"]
-        except Exception as error:
-            print(f"Failed to format final missing-information reply: {error}")
+    message_text_for_reply = (
+        "Only ask for these still-missing items: " + ", ".join(deterministic_missing)
+        if deterministic_missing
+        else "No information is missing. Do not ask the customer any questions; confirm receipt and say the helpdesk will follow up."
+    )
+    try:
+        followup = ollama_client.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                {"role": "user", "content": f"{message_text}\n\n[FINAL REPLY REQUIREMENTS: {message_text_for_reply}]"},
+            ],
+            format="json",
+            think=False,
+            options={"num_ctx": 16384, "temperature": 0.1, "num_thread": 6},
+        )
+        followup_result = _parse_model_json(followup.message.content)
+        if followup_result and isinstance(followup_result.get("reply"), str):
+            result["reply"] = followup_result["reply"]
+    except Exception as error:
+        print(f"Failed to format final information reply: {error}")
 
     return result
 
@@ -1047,6 +1059,34 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     decision = classify_and_draft_reply(description, image_paths, pdf_text, requester_name, ticket_id)
 
+    image_analyses = decision.get("_image_analyses", [])
+    state = load_ticket_state(ticket_id)
+    analysis_cache = state.get("image_analyses", {})
+    noted_hashes = set(state.get("noted_router_image_hashes", []))
+    new_router_analyses = [
+        {**analysis, "file": analysis.get("file") or digest[:12]}
+        for digest, analysis in analysis_cache.items()
+        if digest not in noted_hashes and analysis.get("image_type") == "router_photo"
+    ]
+    router_note = build_internal_note(new_router_analyses)
+    if router_note:
+        try:
+            add_private_note(ticket_id, router_note)
+            noted_hashes.update(
+                digest
+                for digest, analysis in analysis_cache.items()
+                if analysis.get("image_type") == "router_photo"
+            )
+            state["noted_router_image_hashes"] = sorted(noted_hashes)
+            save_ticket_state(ticket_id, state)
+            print(f"Added private router note to ticket {ticket_id} for {len(new_router_analyses)} new router photo(s)")
+        except requests.exceptions.RequestException as error:
+            print(f"Failed to add private router note to ticket {ticket_id}: {error}")
+    elif not image_analyses:
+        print(f"Ticket {ticket_id}: no image analyses available for router note")
+    else:
+        print(f"Ticket {ticket_id}: no new router photos identified for private note")
+
     if decision["category"] == "ignore":
         print(f"Ticket {ticket_id}: classified as ignore, no reply or assignment.")
         cleanup_ticket_files(ticket_id)
@@ -1064,16 +1104,6 @@ def process_ticket(ticket_id: int, requester_email: str, requester_name: str, de
 
     target_email = decision.get("_target_email")
     CC_emails = decision.get("_CC_emails", [])
-    image_analyses = decision.get("_image_analyses", [])
-
-    if decision["category"] in {"wifi", "intercom"}:
-        note = build_internal_note(image_analyses)
-        if note:
-            try:
-                add_private_note(ticket_id, note)
-                print(f"Added private router note to ticket {ticket_id}")
-            except requests.exceptions.RequestException as error:
-                print(f"Failed to add private router note: {error}")
 
     if decision["category"] == "tv":
         address = decision.get("_extracted_address")
@@ -1240,6 +1270,9 @@ def detect_unable_items(text: str) -> set[str]:
         "speedtest screenshot": (
             r"(?:cannot|can't|cant|unable to|no way to|can't give|cant give|cannot give|can't provide|cannot provide).*(?:speedtest)",
             r"(?:no|without|don't have|do not have|don't posses|doesn't have|cannot have|can't have).*(?:speedtest)",
+            r"(?:speedtest|speed test).{0,100}(?:not possible|impossible|not available|cannot be done|can't be done|not feasible)",
+            r"(?:not possible|impossible|not available|cannot be done|can't be done|not feasible).{0,100}(?:speedtest|speed test)",
+            r"(?:there is|it's|it is) no way to.{0,100}(?:speedtest|speed test)",
             r"(?:geen|kan geen|niet in staat).*(?:speedtest)",
         ),
         "router photo": (
