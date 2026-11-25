@@ -32,15 +32,7 @@ FRESHDESK_PASSWORD = os.getenv("FRESHDESK_PASSWORD")
 SUPPORT_AGENT_ID = int(os.getenv("SUPPORT_AGENT_ID"))
 SUPPORT_EMPLOYEE_ID = int(os.getenv("SUPPORT_EMPLOYEE_ID"))
 SUPPORT_AGENT_INTERCOM_ID = int(os.getenv("SUPPORT_AGENT_INTERCOM_ID"))
-ALLOWED_INLINE_IMAGE_HOSTS = {
-    f"{FRESHDESK_DOMAIN}.freshdesk.com".lower(),
-    "eucattachment.freshdesk.com",
-    "solutio365.nl",
-    "www.solutio365.nl",
-    "codomo.eu",
-    "magisrealestate.com",
-    "holland2stay.com",
- }
+ALLOWED_INLINE_IMAGE_HOSTS = os.getenv("ALLOWED_INLINE_IMAGE_HOSTS", "").split(",")
 
 AUTH = (FRESHDESK_API_KEY, FRESHDESK_PASSWORD)
 
